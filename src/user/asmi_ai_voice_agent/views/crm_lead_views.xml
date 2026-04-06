@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_crm_lead_form_ai_agent" model="ir.ui.view">
+        <field name="name">crm.lead.form.ai.agent</field>
+        <field name="model">crm.lead</field>
+        <field name="inherit_id" ref="crm.crm_lead_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet/notebook" position="inside">
+                <page string="AI Agent">
+                    <group>
+                        <button name="action_mark_ai_ready"
+                                string="Mark AI Ready"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_send_to_ai_queue"
+                                string="Send to AI Queue"
+                                type="object"
+                                class="btn-primary"/>
+                        <button name="action_run_ai_queue_processor"
+                                string="Run AI Queue Processor"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_run_ai_stale_recovery"
+                                string="Recover Stale Calls"
+                                type="object"
+                                class="btn-secondary"/>
+                    </group>
+
+                    <group>
+                        <button name="action_generate_razorpay_link"
+                                string="Generate Razorpay Link"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_mark_payment_link_sent"
+                                string="Mark Payment Link Sent"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_mark_payment_completed"
+                                string="Mark Payment Completed"
+                                type="object"
+                                class="btn-success"/>
+                    </group>
+
+                    <group>
+                        <button name="action_request_callback"
+                                string="Request Callback"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_mark_not_interested"
+                                string="Mark Not Interested"
+                                type="object"
+                                class="btn-secondary"/>
+                        <button name="action_mark_wrong_number"
+                                string="Mark Wrong Number"
+                                type="object"
+                                class="btn-secondary"/>
+                    </group>
+
+                    <group>
+                        <group string="Lead Readiness">
+                            <field name="x_499_interested"/>
+                            <field name="x_business_niche"/>
+                            <field name="x_business_model"/>
+                            <field name="x_preferred_language"/>
+                            <field name="x_ai_ready"/>
+                        </group>
+                        <group string="AI Control">
+                            <field name="x_ai_agent_enabled"/>
+                            <field name="x_ai_call_status"/>
+                            <field name="x_ai_call_attempts"/>
+                            <field name="x_strategy_call_booked"/>
+                            <field name="x_lead_temperature"/>
+                            <field name="x_ai_call_result"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Timing">
+                            <field name="x_ai_call_due_at"/>
+                            <field name="x_ai_next_retry_at"/>
+                            <field name="x_callback_requested_at"/>
+                        </group>
+                        <group string="Payment">
+                            <field name="x_rzp_payment_link"/>
+                            <field name="x_rzp_payment_link_id"/>
+                            <field name="x_rzp_payment_reference"/>
+                            <field name="x_rzp_payment_id"/>
+                            <field name="x_rzp_payment_status"/>
+                            <field name="x_rzp_paid_at"/>
+                            <field name="x_whatsapp_sent"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="External Integration">
+                            <field name="x_source_crm_lead_id"/>
+                            <field name="x_external_call_id"/>
+                            <field name="x_ai_dispatch_status"/>
+                            <field name="x_ai_last_dispatch_at"/>
+                            <field name="x_ai_dispatch_ack_at"/>
+                            <field name="x_ai_dispatch_lock_token"/>
+                            <field name="x_ai_worker_name"/>
+                        </group>
+                        <group string="Call Notes">
+                            <field name="x_ai_call_summary"/>
+                            <field name="x_ai_call_recording_url"/>
+                            <field name="x_ai_last_error"/>
+                        </group>
+                    </group>
+
+                    <group>
+                        <group string="Dispatch Payload">
+                            <field name="x_ai_dispatch_payload" nolabel="1"/>
+                        </group>
+                        <group string="Last Result Payload">
+                            <field name="x_ai_last_result_payload" nolabel="1"/>
+                        </group>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

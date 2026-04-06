@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_asmi_gallabox_log_tree" model="ir.ui.view">
+        <field name="name">asmi.gallabox.log.tree</field>
+        <field name="model">asmi.gallabox.log</field>
+        <field name="arch" type="xml">
+            <list string="Gallabox Dispatch Logs">
+                <field name="create_date"/>
+                <field name="source_ref"/>
+                <field name="lead_name"/>
+                <field name="phone"/>
+                <field name="template_name"/>
+                <field name="status"/>
+                <field name="message"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_asmi_gallabox_log_form" model="ir.ui.view">
+        <field name="name">asmi.gallabox.log.form</field>
+        <field name="model">asmi.gallabox.log</field>
+        <field name="arch" type="xml">
+            <form string="Gallabox Dispatch Log">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="name"/>
+                            <field name="webhook_source"/>
+                            <field name="source_ref"/>
+                            <field name="lead_name"/>
+                            <field name="phone"/>
+                        </group>
+                        <group>
+                            <field name="template_name"/>
+                            <field name="payment_link"/>
+                            <field name="status"/>
+                            <field name="gallabox_message_id"/>
+                            <field name="message"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Request Payload">
+                            <field name="request_payload" nolabel="1" widget="text"/>
+                        </page>
+                        <page string="Response Payload">
+                            <field name="response_payload" nolabel="1" widget="text"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_asmi_gallabox_log_search" model="ir.ui.view">
+        <field name="name">asmi.gallabox.log.search</field>
+        <field name="model">asmi.gallabox.log</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="source_ref"/>
+                <field name="lead_name"/>
+                <field name="phone"/>
+                <field name="status"/>
+                <filter string="Sent" name="filter_sent" domain="[('status','=','sent')]"/>
+                <filter string="Failed" name="filter_failed" domain="[('status','=','failed')]"/>
+                <filter string="Duplicates" name="filter_duplicate" domain="[('status','=','duplicate')]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_asmi_gallabox_log" model="ir.actions.act_window">
+        <field name="name">Gallabox Dispatch Logs</field>
+        <field name="res_model">asmi.gallabox.log</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <menuitem id="menu_asmi_gallabox_root" name="Gallabox Bridge" parent="crm.crm_menu_config" sequence="90" groups="base.group_system"/>
+    <menuitem id="menu_asmi_gallabox_logs" name="Dispatch Logs" parent="menu_asmi_gallabox_root" action="action_asmi_gallabox_log" sequence="10" groups="base.group_system"/>
+</odoo>

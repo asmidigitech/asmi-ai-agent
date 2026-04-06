@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_asmi_gallabox_bridge" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.asmi.gallabox.bridge</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="Asmi Gallabox Bridge" name="asmi_gallabox_bridge" groups="base.group_system">
+                    <block title="Gallabox WhatsApp Bridge">
+                        <setting string="Enable Bridge" help="Turn the Odoo.sh webhook receiver on or off.">
+                            <field name="asmi_gallabox_enabled"/>
+                        </setting>
+                        <setting string="Gallabox API Key">
+                            <field name="asmi_gallabox_api_key" password="True"/>
+                        </setting>
+                        <setting string="Gallabox Channel ID">
+                            <field name="asmi_gallabox_channel_id"/>
+                        </setting>
+                        <setting string="Gallabox Template Name">
+                            <field name="asmi_gallabox_template_name"/>
+                        </setting>
+                        <setting string="Payment Link URL">
+                            <field name="asmi_payment_link_url"/>
+                        </setting>
+                        <setting string="Gallabox API URL">
+                            <field name="asmi_gallabox_api_url"/>
+                        </setting>
+                        <setting string="Inbound Webhook Secret">
+                            <field name="asmi_webhook_secret" password="True"/>
+                        </setting>
+                    </block>
+                    <block title="Optional Odoo Online Writeback">
+                        <setting string="Odoo Online URL">
+                            <field name="asmi_odoo_online_url"/>
+                        </setting>
+                        <setting string="Odoo Online Database">
+                            <field name="asmi_odoo_online_db"/>
+                        </setting>
+                        <setting string="Odoo Online Username">
+                            <field name="asmi_odoo_online_username"/>
+                        </setting>
+                        <setting string="Odoo Online API Key / Password">
+                            <field name="asmi_odoo_online_api_key" password="True"/>
+                        </setting>
+                        <div class="text-muted">
+                            Create custom fields in Odoo Online with technical names x_payment_link_sent, x_whatsapp_dispatch_status, and x_whatsapp_dispatch_error if you want status pushed back after send.
+                        </div>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>
