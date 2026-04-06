@@ -18,8 +18,18 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/api/call", callRoutes);
 app.use("/api/exotel", exotelRoutes);
 
-app.get("/", (req, res) => {
-  res.send("AI Voice Agent Running 🚀");
+app.get('/api/exotel/voicebot-url', (req, res) => {
+  const { lead_id, session_id } = req.query;
+
+  const wsUrl = `wss://${process.env.RAILWAY_STATIC_URL || req.headers.host}/ws/exotel?lead_id=${lead_id}&session_id=${session_id}`;
+
+  console.log("Voicebot URL requested:", wsUrl);
+
+  res.send(wsUrl);
+});
+
+
+  
 });
 
 const server = http.createServer(app);
