@@ -8,19 +8,17 @@ async function sendGreeting(ws, streamSid) {
   const pcmBuffer = await textToPcm8k(greeting);
   const chunks = chunkPcm(pcmBuffer, 3200);
 
-  let sequenceNumber = 1;
-  let chunkNumber = 1;
-  let timestamp = 0;
+
 
  for (const chunk of chunks) {
   ws.send(
-    JSON.stringify({
-      event: "media",
-      stream_sid: streamSid,
-      media: {
-        payload: chunk.toString("base64"),
-      },
-    })
+   {
+  event: "media",
+  stream_sid: "...",
+  media: {
+    payload: "base64"
+  }
+})
   );
 
   // 🔥 CRITICAL: real-time delay
