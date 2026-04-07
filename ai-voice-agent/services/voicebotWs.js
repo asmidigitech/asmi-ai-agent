@@ -1,6 +1,10 @@
 const url = require("url");
 const { textToPcm8k, chunkPcm } = require("./elevenlabs");
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function sendGreeting(ws, streamSid) {
   const greeting =
     "Hello Anand. Main Asmi Digitech se bol rahi hoon. Aapka business assessment receive hua hai. Kya abhi 30 seconds ke liye baat kar sakte hain?";
@@ -8,29 +12,27 @@ async function sendGreeting(ws, streamSid) {
   const pcmBuffer = await textToPcm8k(greeting);
   const chunks = chunkPcm(pcmBuffer, 3200);
 
+  for (const chunk of chunks) {
+    ws.send(
+      JSON.stringify({
+        event: "media",
+        stream_sid: streamSid,
+        media: {
+          payload: chunk.toString("base64"),
+        },
+      })
+    );
 
-
- for (const chunk of chunks) {
-  ws.send(
-   {
-  event: "media",
-  stream_sid: "...",
-  media: {
-    payload: "base64"
+    await sleep(40);
   }
-})
-  );
 
-  // 🔥 CRITICAL: real-time delay
-  await new Promise((r) => setTimeout(r, 40)); // 40ms pacing
-}
-  
   ws.send(
     JSON.stringify({
       event: "mark",
-      sequence_number: sequenceNumber++,
       stream_sid: streamSid,
-      mark: { name: "greeting_sent" },
+      mark: {
+        name: "greeting_sent",
+      },
     })
   );
 }
@@ -61,7 +63,8 @@ function attachVoicebotWebSocket(wss) {
             callSid: msg.start?.call_sid || msg.start?.callSid,
             from: msg.start?.from,
             to: msg.start?.to,
-            customParameters: msg.start?.custom_parameters || msg.start?.customParameters,
+            customParameters:
+              msg.start?.custom_parameters || msg.start?.customParameters,
             mediaFormat: msg.start?.media_format || msg.start?.mediaFormat,
           });
 
