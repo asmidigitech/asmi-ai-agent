@@ -12,23 +12,21 @@ async function sendGreeting(ws, streamSid) {
   let chunkNumber = 1;
   let timestamp = 0;
 
-  for (const chunk of chunks) {
-    ws.send(
-      JSON.stringify({
-        event: "media",
-        sequence_number: sequenceNumber++,
-        stream_sid: streamSid,
-        media: {
-          chunk: chunkNumber++,
-          timestamp: String(timestamp),
-          payload: chunk.toString("base64"),
-        },
-      })
-    );
+ for (const chunk of chunks) {
+  ws.send(
+    JSON.stringify({
+      event: "media",
+      stream_sid: streamSid,
+      media: {
+        payload: chunk.toString("base64"),
+      },
+    })
+  );
 
-    timestamp += 200;
-  }
-
+  // 🔥 CRITICAL: real-time delay
+  await new Promise((r) => setTimeout(r, 40)); // 40ms pacing
+}
+  
   ws.send(
     JSON.stringify({
       event: "mark",
