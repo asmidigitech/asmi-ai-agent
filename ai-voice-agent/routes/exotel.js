@@ -8,58 +8,52 @@ const {
 
 const { triggerExotelCall } = require("../services/exotelClient");
 
-const BRIDGE_BASE_URL = process.env.BRIDGE_BASE_URL;
+// ========================================
+// SIMPLE HEALTH CHECK
+// ========================================
+router.get("/health", (req, res) => {
+  return res.json({
+    success: true,
+    message: "Exotel routes working",
+  });
+});
 
 // ========================================
 // DYNAMIC VOICEBOT URL RESOLVER
-// Exotel Voicebot can call this https endpoint,
-// and expects a wss:// URL in response.
+// NO dependency on BRIDGE_BASE_URL
+// Uses request host directly
 // ========================================
-router.post("/voicebot-url", async (req, res) => {
+router.get("/voicebot-url", (req, res) => {
   try {
-    if (!BRIDGE_BASE_URL) {
-      throw new Error("Missing BRIDGE_BASE_URL");
-    }
+    const leadId = req.query.lead_id || "";
+    const sessionId = req.query.session_id || "";
 
-    const leadId =
-      req.body.lead_id ||
-      req.query.lead_id ||
-      req.body.leadId ||
-      req.query.leadId ||
-      "";
+    const host = req.get("host");
+    const protocol = req.headers["x-forwarded-proto"] || "https";
 
-    const sessionId =
-      req.body.session_id ||
-      req.query.session_id ||
-      req.body.sessionId ||
-      req.query.sessionId ||
-      "";
-
-    const wsBase = BRIDGE_BASE_URL.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
-
+    const wsProtocol = protocol === "https" ? "wss" : "ws";
     const wsUrl =
-      `${wsBase}/ws/exotel` +
+      `${wsProtocol}://${host}/ws/exotel` +
       `?lead_id=${encodeURIComponent(leadId)}` +
       `&session_id=${encodeURIComponent(sessionId)}`;
 
-    console.log("🎯 Voicebot URL resolver hit:", {
-      body: req.body,
-      query: req.query,
+    console.log("🎯 Voicebot URL requested:", {
+      leadId,
+      sessionId,
+      host,
+      protocol,
       wsUrl,
     });
 
-    // Exotel expects the https endpoint to return a wss URL.
     return res.status(200).send(wsUrl);
   } catch (error) {
     console.error("❌ /api/exotel/voicebot-url error:", error.message);
-
-    return res.status(500).send("");
+    return res.status(500).send("voicebot-url-error");
   }
 });
 
 // ========================================
 // TRIGGER LIVE EXOTEL CALL
-// Make.com should hit this route, not Exotel directly.
 // ========================================
 router.post("/trigger-call", async (req, res) => {
   try {
@@ -132,7 +126,6 @@ router.post("/trigger-call", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ /api/exotel/trigger-call error:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -193,7 +186,6 @@ router.post("/status", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ /api/exotel/status error:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -231,7 +223,6 @@ router.post("/writeback", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ /api/exotel/writeback error:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message,
@@ -269,7 +260,6 @@ router.post("/attach-text", async (req, res) => {
     });
   } catch (error) {
     console.error("❌ /api/exotel/attach-text error:", error.message);
-
     return res.status(500).json({
       success: false,
       error: error.message,
