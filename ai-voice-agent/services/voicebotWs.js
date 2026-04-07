@@ -11,13 +11,9 @@ function attachVoicebotWebSocket(wss) {
     ws.on("message", (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
-
         console.log("📡 WS event:", msg.event);
 
-        if (msg.event === "connected") {
-          // Exotel connected to websocket
-          return;
-        }
+        if (msg.event === "connected") return;
 
         if (msg.event === "start") {
           console.log("▶️ Stream started:", {
@@ -29,7 +25,6 @@ function attachVoicebotWebSocket(wss) {
             mediaFormat: msg.start?.media_format || msg.start?.mediaFormat,
           });
 
-          // Optional mark so we know socket is writable
           ws.send(
             JSON.stringify({
               event: "mark",
@@ -40,21 +35,9 @@ function attachVoicebotWebSocket(wss) {
           return;
         }
 
-        if (msg.event === "media") {
-          // For now just log chunk arrival.
-          // Next step will process these chunks for STT/Realtime.
-          return;
-        }
-
-        if (msg.event === "dtmf") {
-          console.log("☎️ DTMF:", msg.dtmf);
-          return;
-        }
-
-        if (msg.event === "mark") {
-          console.log("✅ Mark received:", msg.mark);
-          return;
-        }
+        if (msg.event === "media") return;
+        if (msg.event === "dtmf") return;
+        if (msg.event === "mark") return;
 
         if (msg.event === "stop") {
           console.log("⏹ Stream stopped:", msg.stop);
