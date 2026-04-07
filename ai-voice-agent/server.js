@@ -23,6 +23,18 @@ app.get("/", (req, res) => {
 app.use("/api/call", callRoutes);
 app.use("/api/exotel", exotelRoutes);
 
+// Handle bad JSON bodies gracefully
+app.use((err, req, res, next) => {
+  if (err && err.type === "entity.parse.failed") {
+    console.error("❌ Invalid JSON body:", err.message);
+    return res.status(400).json({
+      success: false,
+      error: "Invalid JSON body",
+    });
+  }
+  next(err);
+});
+
 const server = http.createServer(app);
 
 const wss = new WebSocketServer({
