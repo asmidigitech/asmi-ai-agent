@@ -1,312 +1,330 @@
 // intent.js
 
-function normalizeText(input) {
-  return String(input || "")
+const { INTENTS } = require("./config");
+
+function normalizeText(text = "") {
+  return String(text)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .normalize("NFKD")
+    .replace(/[^\p{L}\p{N}\s₹]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function includesAny(text, arr) {
-  return arr.some((term) => text.includes(term));
+function includesAny(text, patterns = []) {
+  return patterns.some((p) => p.test(text));
 }
 
-function classifyIntent(rawText = "", currentState = "") {
+function detectIntent(rawText = "") {
   const text = normalizeText(rawText);
 
-  if (!text) return { intent: "silence", value: null, text };
-
-  // direct link ask
-  if (
-    includesAny(text, [
-      "send link",
-      "link bhejo",
-      "link bhejiye",
-      "link bhej do",
-      "payment link",
-      "whatsapp kar do",
-      "share the link",
-      "पहले लिंक",
-      "लिंक भेजिए",
-      "लिंक भेज दो",
-      "लिंक भेजो"
-    ])
-  ) {
-    return { intent: "ask_link", value: "ask_link", text };
-  }
-
-  // busy
-  if (
-    includesAny(text, [
-      "busy",
-      "call later",
-      "later call",
-      "abhi busy",
-      "baad mein",
-      "not now",
-      "abhi nahi",
-      "me busy hu",
-      "i am busy",
-      "talk later",
-      "later",
-      "थोड़ी देर बाद",
-      "अभी व्यस्त",
-      "अभी नहीं"
-    ])
-  ) {
-    return { intent: "busy", value: "busy", text };
-  }
-
-  // who are you
-  if (
-    includesAny(text, [
-      "who are you",
-      "kaun",
-      "kon bol rahe",
-      "kon बोल रहे",
-      "aap kaun",
-      "who is this",
-      "कौन",
-      "कौन बोल रहे",
-      "आप कौन"
-    ])
-  ) {
-    return { intent: "ask_who_are_you", value: "who", text };
-  }
-
-  // negative
-  if (
-    includesAny(text, [
-      "no",
-      "nahi",
-      "nahin",
-      "not interested",
-      "mat bhejo",
-      "don t want",
-      "do not want",
-      "nahi chahiye",
-      "skip",
-      "stop"
-    ])
-  ) {
-    return { intent: "negative", value: "negative", text };
-  }
-
-  // positive / okay
-  if (
-    includesAny(text, [
-      "yes",
-      "haan",
-      "ha",
-      "ok",
-      "okay",
-      "theek",
-      "thik",
-      "sure",
-      "right",
-      "correct",
-      "hmm",
-      "hmmm",
-      "yes please",
-      "ठीक है",
-      "हाँ"
-    ])
-  ) {
-    return { intent: "affirmative", value: "affirmative", text };
-  }
-
-  // commitment timing
-  if (includesAny(text, ["aaj", "today", "aj"])) {
-    return { intent: "timeline", value: "today", text };
-  }
-
-  if (includesAny(text, ["kal", "tomorrow"])) {
-    return { intent: "timeline", value: "tomorrow", text };
+  if (!text || text.length < 2) {
+    return { intent: INTENTS.SILENCE, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "later",
-      "baad mein",
-      "sometime",
-      "dekhte hain",
-      "dekhenge",
-      "after",
-      "phir",
-      "baadme"
+      /\bwho are you\b/,
+      /\bkaun\b/,
+      /\bkon\b/,
+      /\baap kaun\b/,
+      /\bkaun bol rahe\b/,
+      /\bwho is this\b/,
+      /\bkoun\b/,
     ])
   ) {
-    return { intent: "timeline", value: "later", text };
-  }
-
-  // business type
-  if (
-    includesAny(text, [
-      "service",
-      "services",
-      "consulting",
-      "agency",
-      "coach",
-      "freelance",
-      "professional services"
-    ])
-  ) {
-    return { intent: "business_type", value: "service", text };
+    return { intent: INTENTS.ASK_WHO_ARE_YOU, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "product",
-      "products",
-      "ecommerce",
-      "e commerce",
-      "manufacturing",
-      "physical product",
-      "retail product"
+      /\blink bhej/i,
+      /\bsend link\b/,
+      /\blink send\b/,
+      /\bwhatsapp kar/i,
+      /\bpayment link\b/,
+      /\bpahle link\b/,
+      /\blink bhejiye\b/,
+      /\blink bhejo\b/,
+      /\bshare link\b/,
+      /\bsend me the link\b/,
     ])
   ) {
-    return { intent: "business_type", value: "product", text };
-  }
-
-  if (includesAny(text, ["mixed", "both", "dono"])) {
-    return { intent: "business_type", value: "mixed", text };
-  }
-
-  // niche
-  if (includesAny(text, ["agency", "marketing agency", "digital agency"])) {
-    return { intent: "niche", value: "agency", text };
+    return { intent: INTENTS.ASK_LINK, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "real estate",
-      "realtor",
-      "property",
-      "broker",
-      "builder",
-      "realty"
+      /\bbusy\b/,
+      /\bmeeting\b/,
+      /\bbaad mein\b/,
+      /\bcall later\b/,
+      /\bnot free\b/,
+      /\bthoda busy\b/,
+      /\bcurrently busy\b/,
+      /\bphone rakho\b/,
+      /\bbaad me\b/,
     ])
   ) {
-    return { intent: "niche", value: "real_estate", text };
+    return { intent: INTENTS.BUSY, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "coach",
-      "consultant",
-      "trainer",
-      "mentor",
-      "educator"
+      /\byes\b/,
+      /\bhaan\b/,
+      /\bhan\b/,
+      /\bok\b/,
+      /\bokay\b/,
+      /\btheek\b/,
+      /\bthik\b/,
+      /\bright\b/,
+      /\bcorrect\b/,
+      /\bsure\b/,
+      /\byep\b/,
+      /\bya\b/,
+      /\byeah\b/,
+      /\bkarenge\b/,
+      /\bchalega\b/,
     ])
   ) {
-    return { intent: "niche", value: "coach_consultant", text };
+    return { intent: INTENTS.AFFIRMATIVE, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "local business",
-      "clinic",
-      "doctor",
-      "salon",
-      "restaurant",
-      "shop",
-      "gym"
+      /\bno\b/,
+      /\bnahi\b/,
+      /\bnahin\b/,
+      /\bnot interested\b/,
+      /\bmat\b/,
+      /\bband karo\b/,
+      /\bdon t\b/,
+      /\bnope\b/,
     ])
   ) {
-    return { intent: "niche", value: "local_business", text };
-  }
-
-  if (includesAny(text, ["ecommerce", "e commerce", "amazon", "shopify"])) {
-    return { intent: "niche", value: "ecommerce", text };
-  }
-
-  // challenge
-  if (
-    includesAny(text, [
-      "lead",
-      "leads",
-      "enquiry nahi",
-      "inquiries nahi",
-      "new clients nahi",
-      "not getting leads",
-      "lead generation",
-      "traffic"
-    ])
-  ) {
-    return { intent: "challenge", value: "lead_generation", text };
+    return { intent: INTENTS.NEGATIVE, value: null, raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "conversion",
-      "convert nahi",
-      "closing issue",
-      "follow up",
-      "sales close",
-      "leads aa rahe but convert nahi",
-      "closing"
+      /\baaj\b/,
+      /\btoday\b/,
+      /\baj\b/,
+      /\babhi\b/,
+      /\bnow\b/,
+      /\btoday itself\b/,
     ])
   ) {
-    return { intent: "challenge", value: "low_conversion", text };
+    return { intent: INTENTS.TODAY, value: "today", raw: rawText };
   }
 
   if (
     includesAny(text, [
-      "system",
-      "process",
-      "operations",
-      "team issue",
-      "execution",
-      "automation",
-      "management",
-      "backend"
+      /\bkal\b/,
+      /\btomorrow\b/,
+      /\bnext day\b/,
+      /\btmrw\b/,
     ])
   ) {
-    return { intent: "challenge", value: "operations_system", text };
+    return { intent: INTENTS.TOMORROW, value: "tomorrow", raw: rawText };
   }
 
-  // readiness
   if (
-    currentState === "Q4_READINESS" &&
     includesAny(text, [
-      "yes",
-      "haan",
-      "sure",
-      "karenge",
-      "explore",
-      "interested",
-      "ready"
+      /\blater\b/,
+      /\bbaad mein\b/,
+      /\bdekhenge\b/,
+      /\bsoch ke\b/,
+      /\bphir\b/,
+      /\bnext week\b/,
+      /\bsometime\b/,
     ])
   ) {
-    return { intent: "readiness", value: "yes_ready", text };
+    return { intent: INTENTS.LATER, value: "later", raw: rawText };
   }
 
   if (
-    currentState === "Q4_READINESS" &&
     includesAny(text, [
-      "maybe",
-      "may be",
-      "dekhenge",
-      "sochenge",
-      "later",
-      "not sure"
+      /\bservice\b/,
+      /\bservices\b/,
+      /\bconsulting\b/,
+      /\bagency services\b/,
+      /\bclient work\b/,
     ])
   ) {
-    return { intent: "readiness", value: "maybe", text };
+    return { intent: INTENTS.SERVICE, value: "service", raw: rawText };
   }
 
   if (
-    currentState === "Q4_READINESS" &&
-    includesAny(text, ["no", "nahi", "not now", "abhi nahi"])
+    includesAny(text, [
+      /\bproduct\b/,
+      /\bproducts\b/,
+      /\bmanufacturing\b/,
+      /\bphysical product\b/,
+      /\bselling products\b/,
+    ])
   ) {
-    return { intent: "readiness", value: "not_now", text };
+    return { intent: INTENTS.PRODUCT, value: "product", raw: rawText };
   }
 
-  return { intent: "unknown", value: null, text };
+  if (
+    includesAny(text, [
+      /\bmixed\b/,
+      /\bboth\b/,
+      /\bboth hai\b/,
+      /\bdono\b/,
+      /\bservice and product\b/,
+      /\bproduct and service\b/,
+    ])
+  ) {
+    return { intent: INTENTS.MIXED, value: "mixed", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [/\bagency\b/, /\bad agency\b/, /\bmarketing agency\b/])
+  ) {
+    return { intent: INTENTS.AGENCY, value: "agency", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [
+      /\breal estate\b/,
+      /\brealtor\b/,
+      /\bproperty\b/,
+      /\bbroker\b/,
+      /\bconstruction\b/,
+      /\bbuilder\b/,
+    ])
+  ) {
+    return { intent: INTENTS.REAL_ESTATE, value: "real_estate", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [
+      /\bcoach\b/,
+      /\bconsultant\b/,
+      /\btrainer\b/,
+      /\bmentor\b/,
+      /\bcoaching\b/,
+    ])
+  ) {
+    return { intent: INTENTS.COACH, value: "coach_consultant", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [
+      /\blocal business\b/,
+      /\bshop\b/,
+      /\bclinic\b/,
+      /\brestaurant\b/,
+      /\bsalon\b/,
+      /\bgym\b/,
+      /\bstore\b/,
+    ])
+  ) {
+    return {
+      intent: INTENTS.LOCAL_BUSINESS,
+      value: "local_business",
+      raw: rawText,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      /\becommerce\b/,
+      /\bamazon\b/,
+      /\bflipkart\b/,
+      /\bonline store\b/,
+      /\bd2c\b/,
+    ])
+  ) {
+    return { intent: INTENTS.ECOMMERCE, value: "ecommerce", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [
+      /\bleads\b/,
+      /\blead generation\b/,
+      /\bleads nahi\b/,
+      /\binquiries\b/,
+      /\bprospects\b/,
+      /\btraffic\b/,
+      /\bno leads\b/,
+    ])
+  ) {
+    return {
+      intent: INTENTS.LEAD_PROBLEM,
+      value: "lead_generation",
+      raw: rawText,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      /\bconversion\b/,
+      /\bconvert\b/,
+      /\bclosing\b/,
+      /\bsales close\b/,
+      /\bfollow up\b/,
+      /\bleads aa rahe but\b/,
+    ])
+  ) {
+    return {
+      intent: INTENTS.CONVERSION_PROBLEM,
+      value: "low_conversion",
+      raw: rawText,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      /\bsystem\b/,
+      /\bprocess\b/,
+      /\boperations\b/,
+      /\bteam issue\b/,
+      /\bexecution\b/,
+      /\bworkflow\b/,
+      /\bmanagement\b/,
+    ])
+  ) {
+    return {
+      intent: INTENTS.SYSTEM_PROBLEM,
+      value: "operations_system",
+      raw: rawText,
+    };
+  }
+
+  if (
+    includesAny(text, [
+      /\bseriously\b/,
+      /\bready\b/,
+      /\bkarna chahenge\b/,
+      /\bexplore\b/,
+      /\binterested\b/,
+      /\bhaan karenge\b/,
+    ])
+  ) {
+    return { intent: INTENTS.READY, value: "ready", raw: rawText };
+  }
+
+  if (
+    includesAny(text, [
+      /\bnot ready\b/,
+      /\babhi nahi\b/,
+      /\bnahi karna\b/,
+      /\bnot now\b/,
+      /\blater dekhenge\b/,
+      /\bno interest\b/,
+    ])
+  ) {
+    return { intent: INTENTS.NOT_READY, value: "not_ready", raw: rawText };
+  }
+
+  return { intent: INTENTS.UNKNOWN, value: null, raw: rawText };
 }
 
 module.exports = {
-  classifyIntent,
-  normalizeText
+  detectIntent,
+  normalizeText,
 };
