@@ -5,6 +5,10 @@ const { detectIntent } = require("./intent");
 const { PROMPTS } = require("./prompts");
 const { APP, STATES } = require("./config");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
+
+/**
+ * Keep these mapped to your existing working helper files.
+ */
 const { transcribeAudioBuffer } = require("./stt");
 const { speakAndMark } = require("./tts");
 
@@ -55,6 +59,7 @@ async function sayCurrentState(ws, engine) {
 
   debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
 
+  // Wait for user after these states, except START chain
   if (
     [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
       engine.state
@@ -64,12 +69,16 @@ async function sayCurrentState(ws, engine) {
     return;
   }
 
+  // After START opening, immediately ask permission
   if (current === STATES.START && engine.state === STATES.PERMISSION) {
     await sayCurrentState(ws, engine);
+    return;
   }
 
+  // After MICRO_PITCH, automatically send link line
   if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
     await sayCurrentState(ws, engine);
+    return;
   }
 }
 
@@ -148,10 +157,14 @@ function createAudioCollector() {
 async function handleVoicebotWs(ws, req, lead = {}) {
   const engine = new ConversationStateEngine(lead);
   const audioCollector = createAudioCollector();
-  let greetingSent = false;
 
   debug("🔌 WebSocket connected");
   debug("📞 Lead context:", lead);
+
+  // IMPORTANT:
+  // Keep first greeting immediately on connection.
+  // This was the earlier working behavior with Exotel.
+  await sayCurrentState(ws, engine);
 
   ws.on("message", async (raw) => {
     const msg = safeJsonParse(raw);
@@ -166,11 +179,6 @@ async function handleVoicebotWs(ws, req, lead = {}) {
         case "start":
           debug("📡 Event: start");
           debug("▶️ Call started:", msg.start?.callSid || "");
-
-          if (!greetingSent) {
-            greetingSent = true;
-            await sayCurrentState(ws, engine);
-          }
           break;
 
         case "media":
