@@ -3,6 +3,10 @@ const axios = require("axios");
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 async function generateReply(userText) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("Missing OPENAI_API_KEY");
+  }
+
   const response = await axios.post(
     "https://api.openai.com/v1/chat/completions",
     {
@@ -18,14 +22,15 @@ Speak in Hinglish, confident, natural, short.
 Goal:
 - qualify founder
 - ask only 1 question at a time
-- push toward ₹499 strategy call
+- push toward the 499 rupee strategy call
 
 Do NOT:
 - give long answers
 - talk technical
+- sound robotic
 
 Be human-like.
-          `,
+          `.trim(),
         },
         {
           role: "user",
@@ -33,12 +38,14 @@ Be human-like.
         },
       ],
       max_tokens: 60,
+      temperature: 0.7,
     },
     {
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
         "Content-Type": "application/json",
       },
+      timeout: 60000,
     }
   );
 
