@@ -10,8 +10,6 @@ async function sendGreeting(ws, streamSid) {
     "Hello Anand. Main Asmi Digitech se bol rahi hoon. Aapka business assessment receive hua hai. Kya abhi 30 seconds ke liye baat kar sakte hain?";
 
   const pcmBuffer = await textToPcm8k(greeting);
-
-  // 3200 bytes = 100 ms at 8kHz, 16-bit mono PCM
   const chunks = chunkPcm(pcmBuffer, 3200);
 
   for (const chunk of chunks) {
@@ -25,7 +23,6 @@ async function sendGreeting(ws, streamSid) {
       })
     );
 
-    // IMPORTANT: 3200-byte chunks must be paced at 100ms
     await sleep(100);
   }
 
@@ -33,9 +30,7 @@ async function sendGreeting(ws, streamSid) {
     JSON.stringify({
       event: "mark",
       stream_sid: streamSid,
-      mark: {
-        name: "greeting_sent",
-      },
+      mark: { name: "greeting_sent" },
     })
   );
 }
@@ -46,10 +41,24 @@ function attachVoicebotWebSocket(wss) {
     const query = parsed.query || {};
 
     console.log("🔌 Exotel Voicebot WebSocket connected");
-    console.log("Query params:", query);
 
     let streamSid = null;
     let greetingStarted = false;
+
+    // 🔥 NEW: audio buffer
+    let audioBuffer = [];
+    let silenceTimer = null;
+
+    function handleSilence() {
+      if (audioBuffer.length === 0) return;
+
+      const fullBuffer = Buffer.concat(audioBuffer);
+      console.log("🧠 User finished speaking. Buffer size:", fullBuffer.length);
+
+      // 🔥 IMPORTANT: next step will use this buffer for transcription
+      // For now just log
+      audioBuffer = [];
+    }
 
     ws.on("message", async (raw) => {
       try {
@@ -59,28 +68,29 @@ function attachVoicebotWebSocket(wss) {
           console.log("📡 WS event:", msg.event);
         }
 
-        if (msg.event === "connected") {
-          return;
-        }
-
         if (msg.event === "start") {
           streamSid = msg.stream_sid || msg.streamSid;
-
-          console.log("▶️ Stream started:", {
-            streamSid,
-            callSid: msg.start?.call_sid || msg.start?.callSid,
-            from: msg.start?.from,
-            to: msg.start?.to,
-            customParameters:
-              msg.start?.custom_parameters || msg.start?.customParameters,
-            mediaFormat: msg.start?.media_format || msg.start?.mediaFormat,
-          });
-
           return;
         }
 
         if (msg.event === "media") {
-          // Start greeting only after media begins flowing from Exotel.
+          const payload = msg.media?.payload;
+
+          if (payload) {
+            const chunk = Buffer.from(payload, "base64");
+
+            // store chunk
+            audioBuffer.push(chunk);
+
+            // reset silence timer
+            if (silenceTimer) clearTimeout(silenceTimer);
+
+            silenceTimer = setTimeout(() => {
+              handleSilence();
+            }, 1500); // 1.5 sec silence detection
+          }
+
+          // trigger greeting only once
           if (streamSid && !greetingStarted) {
             greetingStarted = true;
 
@@ -88,38 +98,24 @@ function attachVoicebotWebSocket(wss) {
               await sendGreeting(ws, streamSid);
               console.log("✅ Greeting audio sent");
             } catch (err) {
-              console.error("❌ Greeting send failed:", err.message);
+              console.error("❌ Greeting failed:", err.message);
             }
           }
 
           return;
         }
 
-        if (msg.event === "dtmf") {
-          console.log("☎️ DTMF:", msg.dtmf);
-          return;
-        }
-
-        if (msg.event === "mark") {
-          console.log("✅ Mark received:", msg.mark);
-          return;
-        }
-
         if (msg.event === "stop") {
-          console.log("⏹ Stream stopped:", msg.stop);
+          console.log("⏹ Call ended");
           return;
         }
       } catch (err) {
-        console.error("❌ WS parse error:", err.message);
+        console.error("❌ WS error:", err.message);
       }
     });
 
     ws.on("close", () => {
-      console.log("🔌 Exotel Voicebot WebSocket closed");
-    });
-
-    ws.on("error", (err) => {
-      console.error("❌ Voicebot WS error:", err.message);
+      console.log("🔌 WebSocket closed");
     });
   });
 }
