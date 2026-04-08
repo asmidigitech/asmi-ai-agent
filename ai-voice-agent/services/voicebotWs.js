@@ -9,7 +9,17 @@ function sleep(ms) {
 
 async function playText(ws, streamSid, text) {
   const pcmBuffer = await textToPcm8k(text);
-  const chunks = chunkPcm(pcmBuffer, 3200); // 3200 bytes = 100ms at 8kHz PCM16 mono
+  const chunks = chunkPcm(pcmBuffer, 3200);
+
+  // clear any queued audio before speaking
+  ws.send(
+    JSON.stringify({
+      event: "clear",
+      stream_sid: streamSid
+    })
+  );
+
+  await sleep(100);
 
   for (const chunk of chunks) {
     ws.send(
@@ -17,8 +27,8 @@ async function playText(ws, streamSid, text) {
         event: "media",
         stream_sid: streamSid,
         media: {
-          payload: chunk.toString("base64"),
-        },
+          payload: chunk.toString("base64")
+        }
       })
     );
 
@@ -29,9 +39,7 @@ async function playText(ws, streamSid, text) {
     JSON.stringify({
       event: "mark",
       stream_sid: streamSid,
-      mark: {
-        name: "audio_sent",
-      },
+      mark: { name: "audio_sent" }
     })
   );
 }
@@ -72,23 +80,34 @@ function attachVoicebotWebSocket(wss) {
 
         console.log("🧠 User finished speaking. Buffer size:", fullBuffer.length);
 
-        const result = await transcribePcmBuffer(fullBuffer);
-        const transcript = result.text || "";
+        let transcript = "";
+        try {
+          const result = await transcribePcmBuffer(fullBuffer);
+          transcript = result.text || "";
+        } catch (err) {
+          console.error("❌ Transcription failed:", err.message);
+        }
 
         console.log("📝 Transcript:", transcript);
 
-        if (!transcript.trim()) {
-          console.log("⚠️ Empty transcript, skipping reply");
-          return;
-        }
+        let replyText = "Sure. Aapka business service based hai ya product based?";
 
-        const replyText = await generateReply(transcript);
+        if (transcript.trim()) {
+          try {
+            replyText = await generateReply(transcript);
+          } catch (err) {
+            console.error("❌ AI reply failed:", err.message);
+          }
+        }
 
         console.log("🤖 AI Reply:", replyText);
 
-        await playText(ws, streamSid, replyText);
-
-        console.log("✅ AI reply audio sent");
+        try {
+          await playText(ws, streamSid, replyText);
+          console.log("✅ AI reply audio sent");
+        } catch (err) {
+          console.error("❌ AI playback failed:", err.message);
+        }
       } catch (err) {
         console.error("❌ flushUserSpeech failed:", err.message);
       } finally {
@@ -104,9 +123,7 @@ function attachVoicebotWebSocket(wss) {
           console.log("📡 WS event:", msg.event);
         }
 
-        if (msg.event === "connected") {
-          return;
-        }
+        if (msg.event === "connected") return;
 
         if (msg.event === "start") {
           streamSid = msg.stream_sid || msg.streamSid;
@@ -115,10 +132,7 @@ function attachVoicebotWebSocket(wss) {
             streamSid,
             callSid: msg.start?.call_sid || msg.start?.callSid,
             from: msg.start?.from,
-            to: msg.start?.to,
-            customParameters:
-              msg.start?.custom_parameters || msg.start?.customParameters,
-            mediaFormat: msg.start?.media_format || msg.start?.mediaFormat,
+            to: msg.start?.to
           });
 
           return;
@@ -127,7 +141,6 @@ function attachVoicebotWebSocket(wss) {
         if (msg.event === "media") {
           const payload = msg.media?.payload;
 
-          // Start greeting only once, after first media arrives
           if (streamSid && !greetingStarted) {
             greetingStarted = true;
 
@@ -142,7 +155,6 @@ function attachVoicebotWebSocket(wss) {
             return;
           }
 
-          // After greeting, collect caller audio
           if (greetingDone && payload) {
             const chunk = Buffer.from(payload, "base64");
             audioBuffer.push(chunk);
@@ -151,14 +163,9 @@ function attachVoicebotWebSocket(wss) {
 
             silenceTimer = setTimeout(async () => {
               await flushUserSpeech();
-            }, 1500);
+            }, 900);
           }
 
-          return;
-        }
-
-        if (msg.event === "dtmf") {
-          console.log("☎️ DTMF:", msg.dtmf);
           return;
         }
 
@@ -171,7 +178,6 @@ function attachVoicebotWebSocket(wss) {
           console.log("⏹ Stream stopped:", msg.stop);
 
           if (silenceTimer) clearTimeout(silenceTimer);
-
           await flushUserSpeech();
           return;
         }
@@ -191,5 +197,5 @@ function attachVoicebotWebSocket(wss) {
 }
 
 module.exports = {
-  attachVoicebotWebSocket,
+  attachVoicebotWebSocket
 };
