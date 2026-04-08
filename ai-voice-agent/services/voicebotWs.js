@@ -69,10 +69,7 @@ async function sayCurrentState(ws, engine) {
     return;
   }
 
-  if (current === STATES.START && engine.state === STATES.PERMISSION) {
-    await sayCurrentState(ws, engine);
-  }
-
+ 
   if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
     await sayCurrentState(ws, engine);
   }
