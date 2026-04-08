@@ -251,32 +251,91 @@ async function handleVoicebotWs(ws, req, lead = {}) {
     }
   });
 }
+async function handleVoicebotWs(ws, req, lead = {}) {
+  const engine = new ConversationStateEngine({
+    lead_id: lead.lead_id || null,
+    session_id: lead.session_id || null,
+    name: lead.name || "sir",
+    phone: lead.phone || "",
+    score: lead.score || 0,
+    stage: lead.stage || "",
+    heat: lead.heat || "",
+    niche: lead.niche || "",
+  });
 
-function attachVoicebotWebSocket(wss) {
-  wss.on("connection", async (ws, req) => {
-    const url = new URL(req.url, "http://localhost");
+  const audioCollector = createAudioCollector();
 
-    const lead = {
-      lead_id: url.searchParams.get("lead_id") || null,
-      session_id: url.searchParams.get("session_id") || null,
-      name: url.searchParams.get("name") || "sir",
-      phone: url.searchParams.get("phone") || "",
-      score: Number(url.searchParams.get("score") || 0),
-      stage: url.searchParams.get("stage") || "",
-      heat: url.searchParams.get("heat") || "",
-      niche: url.searchParams.get("niche") || "",
-    };
+  debug("🔌 WebSocket connected");
+  debug("📞 Lead context:", engine.ctx);
+
+  await sayCurrentState(ws, engine);
+
+  ws.on("message", async (raw) => {
+    const msg = safeJsonParse(raw);
+    if (!msg) return;
 
     try {
-      await handleVoicebotWs(ws, req, lead);
+      switch (msg.event) {
+        case "connected":
+          debug("📡 Event: connected");
+          break;
+
+        case "start":
+          debug("📡 Event: start");
+          debug("▶️ Call started:", msg.start?.callSid || "");
+          break;
+
+        case "media":
+          if (msg.media?.payload) {
+            audioCollector.push(msg.media.payload);
+          }
+          break;
+
+        case "mark": {
+          debug("📡 Event: mark");
+
+          const size = audioCollector.size();
+          if (!size || size < 4000) {
+            debug("🔇 Not enough audio, treating as silence");
+            await handleIntentFlow(ws, engine, "");
+            audioCollector.clear();
+            break;
+          }
+
+          const audioBuffer = audioCollector.consume();
+          debug("🧠 Processing speech bytes:", audioBuffer.length);
+
+          const transcript = await transcribeAudioBuffer(audioBuffer);
+          await handleIntentFlow(ws, engine, transcript || "");
+          break;
+        }
+
+        case "stop":
+          debug("📡 Event: stop");
+          debug("⏹ Call stopped");
+          ws.close();
+          break;
+
+        default:
+          debug("ℹ️ Unhandled event:", msg.event);
+          break;
+      }
     } catch (err) {
-      console.error("❌ attachVoicebotWebSocket error:", err);
-      try {
-        ws.close();
-      } catch (_) {}
+      console.error("❌ voicebotWs error:", err);
     }
   });
+
+  ws.on("close", async () => {
+    debug("🔌 WebSocket closed");
+  });
+
+  ws.on("error", async (err) => {
+    console.error("❌ WebSocket error:", err);
+  });
 }
+
+
+
 
 module.exports = {
   attachVoicebotWebSocket,
