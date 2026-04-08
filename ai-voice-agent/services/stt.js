@@ -1,16 +1,42 @@
 // stt.js
-// Replace this with your existing working STT code if already present.
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const OpenAI = require("openai");
+
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 async function transcribeAudioBuffer(audioBuffer) {
-  // IMPORTANT:
-  // Plug your current OpenAI / Whisper / STT implementation here.
-  // Return plain transcript string.
+  try {
+    if (!audioBuffer || !audioBuffer.length) {
+      return "";
+    }
 
-  // Example placeholder:
-  // const transcript = await yourExistingTranscriber(audioBuffer);
-  // return transcript?.text || "";
+    const tmpFile = path.join(
+      os.tmpdir(),
+      `exotel-audio-${Date.now()}-${Math.random().toString(36).slice(2)}.wav`
+    );
 
-  return "";
+    fs.writeFileSync(tmpFile, audioBuffer);
+
+    const result = await client.audio.transcriptions.create({
+      file: fs.createReadStream(tmpFile),
+      model: "gpt-4o-mini-transcribe",
+      language: "hi",
+    });
+
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch (_) {}
+
+    return (result.text || "").trim();
+  } catch (err) {
+    console.error("❌ STT transcription failed:", err.response?.data || err.message || err);
+    return "";
+  }
 }
 
 module.exports = {
