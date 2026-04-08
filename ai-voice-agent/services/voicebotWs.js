@@ -5,13 +5,8 @@ const { detectIntent } = require("./intent");
 const { PROMPTS } = require("./prompts");
 const { APP, STATES } = require("./config");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
-
-/**
- * Replace these imports with your existing working implementations if file names differ.
- * Keep the rest of the flow logic same.
- */
-const { transcribeAudioBuffer } = require("./stt"); // <- map to your existing STT helper
-const { speakAndMark } = require("./tts"); // <- map to your existing TTS helper
+const { transcribeAudioBuffer } = require("./stt");
+const { speakAndMark } = require("./tts");
 
 function debug(...args) {
   if (APP.DEBUG) console.log(...args);
@@ -69,7 +64,10 @@ async function sayCurrentState(ws, engine) {
     return;
   }
 
- 
+  if (current === STATES.START && engine.state === STATES.PERMISSION) {
+    await sayCurrentState(ws, engine);
+  }
+
   if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
     await sayCurrentState(ws, engine);
   }
@@ -150,11 +148,10 @@ function createAudioCollector() {
 async function handleVoicebotWs(ws, req, lead = {}) {
   const engine = new ConversationStateEngine(lead);
   const audioCollector = createAudioCollector();
+  let greetingSent = false;
 
   debug("🔌 WebSocket connected");
   debug("📞 Lead context:", lead);
-
-  await sayCurrentState(ws, engine);
 
   ws.on("message", async (raw) => {
     const msg = safeJsonParse(raw);
@@ -169,6 +166,11 @@ async function handleVoicebotWs(ws, req, lead = {}) {
         case "start":
           debug("📡 Event: start");
           debug("▶️ Call started:", msg.start?.callSid || "");
+
+          if (!greetingSent) {
+            greetingSent = true;
+            await sayCurrentState(ws, engine);
+          }
           break;
 
         case "media":
