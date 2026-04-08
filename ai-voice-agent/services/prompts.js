@@ -1,90 +1,107 @@
 // prompts.js
 
-const prompts = {
-  START: ({ name }) =>
-    `Hi ${name || "ji"}, main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right?`,
+function fill(text, vars = {}) {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || "");
+}
 
-  START_RETRY: () =>
-    `Bas confirm karna tha, aapne recently business assessment fill kiya tha na?`,
-
-  PERMISSION: () =>
-    `Main bas 30 seconds loongi. Ek-do short questions poochke aapko ₹499 strategy call ka link WhatsApp par share kar dungi. Theek hai?`,
-
-  PERMISSION_BUSY: () =>
-    `Koi issue nahi. Main aapko WhatsApp par ₹499 strategy call ka link share kar deti hoon.`,
-
-  Q1_BUSINESS_TYPE: () =>
-    `Aapka business mainly service based hai, product based hai, ya mixed?`,
-
-  Q1_BUSINESS_TYPE_RETRY: () =>
-    `Short mein batayiye please — service, product, ya mixed?`,
-
-  Q2_NICHE: () =>
-    `Aap mostly kis type ke clients ko serve karte ho? Agency, real estate, coaches, local business, ya kuch aur?`,
-
-  Q2_NICHE_RETRY: () =>
-    `Short mein batayiye — agency, real estate, coach, local business, ya other?`,
-
-  Q3_CHALLENGE: () =>
-    `Abhi sabse bada challenge kya hai — leads, conversion, ya system/process?`,
-
-  Q3_CHALLENGE_RETRY: () =>
-    `Ek option choose kijiye please — leads, conversion, ya system?`,
-
-  Q4_READINESS: () =>
-    `Agar Anand sir exact next step bata dein, toh kya aap implementation seriously explore karna chahenge?`,
-
-  Q4_READINESS_RETRY: () =>
-    `Simple yes ya maybe mein batayiye please.`,
-
-  MICRO_PITCH: ({ challenge }) => {
-    switch (challenge) {
-      case "lead_generation":
-        return `Got it. Yahan sahi lead flow aur conversion clarity dono important hain. Isi liye short strategy call useful rahegi.`;
-      case "low_conversion":
-        return `Samajh gaya. Issue lead ka nahi, conversion aur follow-up system ka lag raha hai. Isi liye short strategy call useful rahegi.`;
-      case "operations_system":
-        return `Understood. Yahan growth ke liye strong process aur execution structure zaroori hai. Isi liye short strategy call useful rahegi.`;
-      default:
-        return `Samajh gaya. Isi liye ye short strategy call useful rahegi.`;
-    }
+const PROMPTS = {
+  opening(ctx) {
+    return fill(
+      "Hi {{name}}, main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right?",
+      { name: ctx.name || "sir" }
+    );
   },
 
-  ASK_LINK_CONFIRM: () =>
-    `Main abhi aapko ₹499 strategy call ka link WhatsApp par share kar rahi hoon.`,
+  permission() {
+    return "Main bas 30 seconds loongi. Ek-do short questions poochke aapko ₹499 strategy call ka link WhatsApp par share kar dungi. Theek hai?";
+  },
 
-  COMMITMENT_CHECK: () =>
-    `Aap isse aaj complete karoge ya kal?`,
+  q1BusinessType() {
+    return "Aapka business mainly service based hai, product based hai, ya mixed?";
+  },
 
-  COMMITMENT_SOFT: () =>
-    `Aap convenient time par check kar loge na?`,
+  q1Retry() {
+    return "Short mein batayiye please — service, product, ya mixed?";
+  },
 
-  CLOSE_POSITIVE: () =>
-    `Perfect. Anand sir se baat karke aapko clear direction mil jayegi. Thank you.`,
+  q2Niche() {
+    return "Aap mostly kis type ke clients ko serve karte ho? Agency, real estate, coaches, local business, ecommerce, ya kuch aur?";
+  },
 
-  CLOSE_SOFT: () =>
-    `No worries. Main link share kar deti hoon, aap convenience se review kar lena.`,
+  q2Retry() {
+    return "Short mein batayiye please — agency, real estate, coaches, local business, ya kuch aur?";
+  },
 
-  CLOSE_BUSY: () =>
-    `Koi issue nahi. Main link abhi share kar deti hoon. Jab convenient ho tab book kar lena.`,
+  q3Challenge() {
+    return "Abhi sabse bada challenge kya hai — leads, conversion, ya system aur process?";
+  },
 
-  CLOSE_NOT_INTERESTED: () =>
-    `Theek hai, koi pressure nahi. Main link share kar deti hoon, agar later useful lage toh use kar lena.`,
+  q3Retry() {
+    return "Short mein batayiye — leads, conversion, ya system/process?";
+  },
 
-  WHO_ARE_YOU: () =>
-    `Main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne business assessment fill kiya tha, usi ke regarding call hai.`,
+  q4Readiness() {
+    return "Agar Anand sir exact next step bata dein, toh kya aap implementation seriously explore karna chahenge?";
+  },
 
-  ASK_LINK_DIRECT: () =>
-    `Bilkul. Main abhi WhatsApp par link share kar deti hoon.`,
+  q4Retry() {
+    return "Simple yes ya no mein batayiye — seriously explore karna chahenge?";
+  },
 
-  FALLBACK: () =>
-    `Sorry, short mein batayiye please.`,
+  busySoft() {
+    return "Koi issue nahi. Main link WhatsApp par share kar deti hoon.";
+  },
 
-  SILENCE_FALLBACK: () =>
-    `Hello, meri awaaz aa rahi hai? Short mein batayiye please.`,
+  whoAreYou() {
+    return "Main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne business assessment fill kiya tha.";
+  },
 
-  GOODBYE: () =>
-    `Thank you. Have a great day.`
+  reminder() {
+    return "Aapne business assessment fill kiya tha aur strategy call mein interest show kiya tha.";
+  },
+
+  microPitch(problemType) {
+    const map = {
+      lead_generation:
+        "Got it. Yahan sahi lead flow aur conversion clarity dono important hain.",
+      low_conversion:
+        "Samajh gaya. Issue lead ka nahi, conversion aur follow-up system ka lag raha hai.",
+      operations_system:
+        "Understood. Yahan growth ke liye strong process aur execution structure zaroori hai.",
+      unclear:
+        "Samajh gaya. Isi liye short strategy call useful rahegi.",
+    };
+
+    return `${map[problemType] || map.unclear} Isi liye ₹499 strategy call useful rahegi, kyunki Anand sir aapke current gap aur practical next step clear karenge.`;
+  },
+
+  sendLink() {
+    return "Main abhi aapko ₹499 strategy call ka link WhatsApp par share kar rahi hoon.";
+  },
+
+  commitmentCheck() {
+    return "Aap isse aaj complete karoge ya kal?";
+  },
+
+  closePositive() {
+    return "Perfect. Anand sir se baat karke aapko clear direction mil jayegi. Thank you.";
+  },
+
+  closeSoft() {
+    return "No worries. Main link share kar deti hoon, aap convenience se review kar lena.";
+  },
+
+  closeBusy() {
+    return "Koi issue nahi. Main link abhi share kar deti hoon. Jab convenient ho tab book kar lena.";
+  },
+
+  alreadySentLink() {
+    return "Perfect, maine link share kar diya hai.";
+  },
+
+  silenceFallback() {
+    return "Lagta hai audio clear nahi aaya. Main link WhatsApp par share kar deti hoon.";
+  },
 };
 
-module.exports = prompts;
+module.exports = { PROMPTS, fill };
