@@ -10,6 +10,8 @@ async function sendGreeting(ws, streamSid) {
     "Hello Anand. Main Asmi Digitech se bol rahi hoon. Aapka business assessment receive hua hai. Kya abhi 30 seconds ke liye baat kar sakte hain?";
 
   const pcmBuffer = await textToPcm8k(greeting);
+
+  // 3200 bytes = 100 ms at 8kHz, 16-bit mono PCM
   const chunks = chunkPcm(pcmBuffer, 3200);
 
   for (const chunk of chunks) {
@@ -23,7 +25,8 @@ async function sendGreeting(ws, streamSid) {
       })
     );
 
-    await sleep(40);
+    // IMPORTANT: 3200-byte chunks must be paced at 100ms
+    await sleep(100);
   }
 
   ws.send(
@@ -45,18 +48,23 @@ function attachVoicebotWebSocket(wss) {
     console.log("🔌 Exotel Voicebot WebSocket connected");
     console.log("Query params:", query);
 
+    let streamSid = null;
+    let greetingStarted = false;
+
     ws.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
 
-        console.log("📡 WS event:", msg.event);
+        if (msg.event !== "media") {
+          console.log("📡 WS event:", msg.event);
+        }
 
         if (msg.event === "connected") {
           return;
         }
 
         if (msg.event === "start") {
-          const streamSid = msg.stream_sid || msg.streamSid;
+          streamSid = msg.stream_sid || msg.streamSid;
 
           console.log("▶️ Stream started:", {
             streamSid,
@@ -68,17 +76,22 @@ function attachVoicebotWebSocket(wss) {
             mediaFormat: msg.start?.media_format || msg.start?.mediaFormat,
           });
 
-          try {
-            await sendGreeting(ws, streamSid);
-            console.log("✅ Greeting audio sent");
-          } catch (err) {
-            console.error("❌ Greeting send failed:", err.message);
-          }
-
           return;
         }
 
         if (msg.event === "media") {
+          // Start greeting only after media begins flowing from Exotel.
+          if (streamSid && !greetingStarted) {
+            greetingStarted = true;
+
+            try {
+              await sendGreeting(ws, streamSid);
+              console.log("✅ Greeting audio sent");
+            } catch (err) {
+              console.error("❌ Greeting send failed:", err.message);
+            }
+          }
+
           return;
         }
 
