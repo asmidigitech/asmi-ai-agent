@@ -1,17 +1,15 @@
 const url = require("url");
 const { textToPcm8k, chunkPcm } = require("./elevenlabs");
 const { transcribePcmBuffer } = require("./transcribe");
+const { generateReply } = require("./aiReply");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendGreeting(ws, streamSid) {
-  const greeting =
-    "Hello Anand. Main Asmi Digitech se bol rahi hoon. Aapka business assessment receive hua hai. Kya abhi 30 seconds ke liye baat kar sakte hain?";
-
-  const pcmBuffer = await textToPcm8k(greeting);
-  const chunks = chunkPcm(pcmBuffer, 3200); // 3200 bytes = 100 ms at 8kHz PCM16 mono
+async function playText(ws, streamSid, text) {
+  const pcmBuffer = await textToPcm8k(text);
+  const chunks = chunkPcm(pcmBuffer, 3200); // 3200 bytes = 100ms at 8kHz PCM16 mono
 
   for (const chunk of chunks) {
     ws.send(
@@ -32,10 +30,17 @@ async function sendGreeting(ws, streamSid) {
       event: "mark",
       stream_sid: streamSid,
       mark: {
-        name: "greeting_sent",
+        name: "audio_sent",
       },
     })
   );
+}
+
+async function sendGreeting(ws, streamSid) {
+  const greeting =
+    "Hello Anand. Main Asmi Digitech se bol rahi hoon. Aapka business assessment receive hua hai. Kya abhi 30 seconds ke liye baat kar sakte hain?";
+
+  await playText(ws, streamSid, greeting);
 }
 
 function attachVoicebotWebSocket(wss) {
@@ -52,13 +57,14 @@ function attachVoicebotWebSocket(wss) {
 
     let audioBuffer = [];
     let silenceTimer = null;
-    let transcribing = false;
+    let processingUserSpeech = false;
 
     async function flushUserSpeech() {
       if (audioBuffer.length === 0) return;
-      if (transcribing) return;
+      if (processingUserSpeech) return;
+      if (!streamSid) return;
 
-      transcribing = true;
+      processingUserSpeech = true;
 
       try {
         const fullBuffer = Buffer.concat(audioBuffer);
@@ -70,10 +76,23 @@ function attachVoicebotWebSocket(wss) {
         const transcript = result.text || "";
 
         console.log("📝 Transcript:", transcript);
+
+        if (!transcript.trim()) {
+          console.log("⚠️ Empty transcript, skipping reply");
+          return;
+        }
+
+        const replyText = await generateReply(transcript);
+
+        console.log("🤖 AI Reply:", replyText);
+
+        await playText(ws, streamSid, replyText);
+
+        console.log("✅ AI reply audio sent");
       } catch (err) {
-        console.error("❌ Transcription failed:", err.message);
+        console.error("❌ flushUserSpeech failed:", err.message);
       } finally {
-        transcribing = false;
+        processingUserSpeech = false;
       }
     }
 
@@ -123,7 +142,7 @@ function attachVoicebotWebSocket(wss) {
             return;
           }
 
-          // After greeting is done, capture caller audio
+          // After greeting, collect caller audio
           if (greetingDone && payload) {
             const chunk = Buffer.from(payload, "base64");
             audioBuffer.push(chunk);
@@ -151,9 +170,7 @@ function attachVoicebotWebSocket(wss) {
         if (msg.event === "stop") {
           console.log("⏹ Stream stopped:", msg.stop);
 
-          if (silenceTimer) {
-            clearTimeout(silenceTimer);
-          }
+          if (silenceTimer) clearTimeout(silenceTimer);
 
           await flushUserSpeech();
           return;
