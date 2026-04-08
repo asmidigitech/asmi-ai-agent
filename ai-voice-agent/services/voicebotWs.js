@@ -58,29 +58,21 @@ async function sayCurrentState(ws, engine) {
   const current = engine.state;
   engine.nextAfterBotUtterance();
 
-  // START speaks opening, then next live state should become PERMISSION
-  // MICRO_PITCH -> SEND_LINK
-  // SEND_LINK -> COMMITMENT_CHECK
-  // CLOSE -> ENDED
   debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
 
-  // auto-speak chained states
   if (
     [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
       engine.state
     ) &&
     current !== STATES.START
   ) {
-    // do nothing, wait for user after these states
     return;
   }
 
-  // after START opening, we must immediately ask permission
   if (current === STATES.START && engine.state === STATES.PERMISSION) {
     await sayCurrentState(ws, engine);
   }
 
-  // after MICRO_PITCH bot line, automatically move to SEND_LINK and speak it
   if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
     await sayCurrentState(ws, engine);
   }
@@ -231,10 +223,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
       }
 
       try {
-        await speakAndMark(
-          ws,
-          PROMPTS.silenceFallback()
-        );
+        await speakAndMark(ws, PROMPTS.silenceFallback());
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
@@ -256,6 +245,33 @@ async function handleVoicebotWs(ws, req, lead = {}) {
   });
 }
 
+function attachVoicebotWebSocket(wss) {
+  wss.on("connection", async (ws, req) => {
+    const url = new URL(req.url, "http://localhost");
+
+    const lead = {
+      lead_id: url.searchParams.get("lead_id") || null,
+      session_id: url.searchParams.get("session_id") || null,
+      name: url.searchParams.get("name") || "sir",
+      phone: url.searchParams.get("phone") || "",
+      score: Number(url.searchParams.get("score") || 0),
+      stage: url.searchParams.get("stage") || "",
+      heat: url.searchParams.get("heat") || "",
+      niche: url.searchParams.get("niche") || "",
+    };
+
+    try {
+      await handleVoicebotWs(ws, req, lead);
+    } catch (err) {
+      console.error("❌ attachVoicebotWebSocket error:", err);
+      try {
+        ws.close();
+      } catch (_) {}
+    }
+  });
+}
+
 module.exports = {
+  attachVoicebotWebSocket,
   handleVoicebotWs,
 };
