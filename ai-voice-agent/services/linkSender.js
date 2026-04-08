@@ -9,15 +9,13 @@ function normalizePhone(phone = "") {
 
   if (digits.length === 10) return `91${digits}`;
   if (digits.length === 12 && digits.startsWith("91")) return digits;
-  if (digits.length > 12 && digits.endsWith(digits.slice(-10))) {
-    return `91${digits.slice(-10)}`;
-  }
+  if (digits.length > 12) return `91${digits.slice(-10)}`;
 
   return digits;
 }
 
 function buildRequestId(leadId) {
-  return `${APP.GALLABOX_REQUEST_ID_PREFIX}-${leadId || "na"}-${Date.now()}-${crypto
+  return `${APP.GALLABOX_REQUEST_ID_PREFIX || "asmi-wa"}-${leadId || "na"}-${Date.now()}-${crypto
     .randomBytes(3)
     .toString("hex")}`;
 }
@@ -42,9 +40,6 @@ async function sendViaGallaboxDirect(lead) {
   const phone = normalizePhone(lead.phone);
   const requestId = buildRequestId(lead.lead_id);
 
-  // IMPORTANT:
-  // If your exact Gallabox payload is slightly different,
-  // only change this payload body.
   const payload = {
     channelId: APP.GALLABOX_CHANNEL_ID,
     channelType: "whatsapp",
@@ -55,8 +50,8 @@ async function sendViaGallaboxDirect(lead) {
     whatsapp: {
       type: "template",
       template: {
-        templateName: APP.GALLABOX_TEMPLATE_NAME_PAYMENT,
-        languageCode: APP.GALLABOX_TEMPLATE_LANGUAGE,
+        templateName: APP.GALLABOX_TEMPLATE_NAME_PAYMENT || "wa499",
+        languageCode: APP.GALLABOX_TEMPLATE_LANGUAGE || "en",
         bodyValues: [
           lead.name || "Customer",
           APP.PAYMENT_LINK,
@@ -69,7 +64,11 @@ async function sendViaGallaboxDirect(lead) {
       session_id: lead.session_id || null,
       stage: lead.stage || "",
       heat: lead.heat || "",
-      niche: lead.niche || "",
+      niche: lead.nicheBucket || lead.niche || "",
+      business_type: lead.businessType || "",
+      problem_type: lead.problemType || "",
+      readiness: lead.readiness || "",
+      commitment: lead.commitment || "",
       template_key: "wa499",
     },
   };
@@ -93,7 +92,7 @@ async function sendViaGallaboxDirect(lead) {
 
 async function sendWhatsAppPaymentLink(lead) {
   const payload = {
-    template_key: "wa499",
+    template_key: "wa499", // tells Make to send second WhatsApp/payment template
     payment_link: APP.PAYMENT_LINK,
     lead_id: lead.lead_id || null,
     session_id: lead.session_id || null,
@@ -110,10 +109,12 @@ async function sendWhatsAppPaymentLink(lead) {
   };
 
   try {
+    // PRIMARY: existing live Make.com flow
     if (APP.WHATSAPP_WEBHOOK_URL) {
       return await sendViaWebhook(payload);
     }
 
+    // FALLBACK ONLY: direct Gallabox
     return await sendViaGallaboxDirect(lead);
   } catch (error) {
     return {
