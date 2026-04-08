@@ -1,225 +1,261 @@
-const url = require("url");
-const { textToPcm8k, chunkPcm } = require("./elevenlabs");
-const { transcribePcmBuffer } = require("./transcribe");
-const { generateReply } = require("./aiReply");
-const { nextState } = require("./stateEngine");
+// voicebotWs.js
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+const { ConversationStateEngine } = require("./stateEngine");
+const { detectIntent } = require("./intent");
+const { PROMPTS } = require("./prompts");
+const { APP, STATES } = require("./config");
+const { sendWhatsAppPaymentLink } = require("./linkSender");
+
+/**
+ * Replace these imports with your existing working implementations if file names differ.
+ * Keep the rest of the flow logic same.
+ */
+const { transcribeAudioBuffer } = require("./stt"); // <- map to your existing STT helper
+const { speakAndMark } = require("./tts"); // <- map to your existing TTS helper
+
+function debug(...args) {
+  if (APP.DEBUG) console.log(...args);
 }
 
-// 🔊 Detect speech energy
-function getAverageAmplitude(buffer) {
-  if (!buffer || buffer.length < 2) return 0;
-
-  let sum = 0;
-  let samples = 0;
-
-  for (let i = 0; i < buffer.length - 1; i += 2) {
-    const sample = buffer.readInt16LE(i);
-    sum += Math.abs(sample);
-    samples += 1;
-  }
-
-  return samples ? sum / samples : 0;
-}
-
-// 🔊 Play audio safely
-async function playText(ws, streamSid, text) {
+function safeJsonParse(data) {
   try {
-    const pcmBuffer = await textToPcm8k(text);
-    const chunks = chunkPcm(pcmBuffer, 3200);
-
-    // clear previous audio
-    ws.send(
-      JSON.stringify({
-        event: "clear",
-        stream_sid: streamSid,
-      })
-    );
-
-    await sleep(100);
-
-    for (const chunk of chunks) {
-      ws.send(
-        JSON.stringify({
-          event: "media",
-          stream_sid: streamSid,
-          media: {
-            payload: chunk.toString("base64"),
-          },
-        })
-      );
-
-      await sleep(100);
-    }
-
-    ws.send(
-      JSON.stringify({
-        event: "mark",
-        stream_sid: streamSid,
-        mark: { name: "audio_sent" },
-      })
-    );
-  } catch (err) {
-    console.error("❌ playText error:", err.message);
+    return JSON.parse(data);
+  } catch {
+    return null;
   }
 }
 
-// 🎤 Greeting
-async function sendGreeting(ws, streamSid) {
-  const greeting =
-    "Hi, Riya bol rahi hoon Asmi Digitech se. Aapne business assessment complete kiya tha aur ₹499 strategy call ke liye interest show kiya tha. Main bas aapko next step mein help kar rahi hoon.";
+async function sendLinkOnce(engine) {
+  if (engine.ctx.linkSent) {
+    return { ok: true, skipped: true };
+  }
 
-  await playText(ws, streamSid, greeting);
+  const result = await sendWhatsAppPaymentLink(engine.ctx);
+
+  if (result.ok) {
+    engine.markLinkSent();
+    debug("✅ WhatsApp payment link sent:", result.mode, result.status || "");
+  } else {
+    debug("❌ WhatsApp payment link failed:", result.error);
+  }
+
+  return result;
 }
 
-function attachVoicebotWebSocket(wss) {
-  wss.on("connection", (ws, req) => {
-    const parsed = url.parse(req.url, true);
-    const query = parsed.query || {};
+async function sayCurrentState(ws, engine) {
+  const text = engine.getCurrentQuestion();
+  engine.lastBotMessage = text;
+  engine.log({ type: "bot", text });
 
-    console.log("🔌 WebSocket connected");
-    console.log("Query:", query);
+  debug(`🤖 State ${engine.state}: ${text}`);
 
-    let streamSid = null;
-    let greetingStarted = false;
-    let greetingDone = false;
-    let processing = false;
+  await speakAndMark(ws, text);
 
-    let audioBuffer = [];
-    let speechStarted = false;
-    let silenceFrames = 0;
+  if (engine.state === STATES.SEND_LINK) {
+    await sendLinkOnce(engine);
+  }
 
-    let currentState = "START";
+  const current = engine.state;
+  engine.nextAfterBotUtterance();
 
-    const SPEECH_THRESHOLD = 600;
-    const SILENCE_LIMIT = 10;
+  // START speaks opening, then next live state should become PERMISSION
+  // MICRO_PITCH -> SEND_LINK
+  // SEND_LINK -> COMMITMENT_CHECK
+  // CLOSE -> ENDED
+  debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
 
-    async function flushUserSpeech() {
-      if (audioBuffer.length === 0) return;
-      if (processing) return;
-      if (!streamSid) return;
+  // auto-speak chained states
+  if (
+    [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
+      engine.state
+    ) &&
+    current !== STATES.START
+  ) {
+    // do nothing, wait for user after these states
+    return;
+  }
 
-      processing = true;
+  // after START opening, we must immediately ask permission
+  if (current === STATES.START && engine.state === STATES.PERMISSION) {
+    await sayCurrentState(ws, engine);
+  }
 
-      try {
-        const fullBuffer = Buffer.concat(audioBuffer);
-        audioBuffer = [];
-        speechStarted = false;
-        silenceFrames = 0;
+  // after MICRO_PITCH bot line, automatically move to SEND_LINK and speak it
+  if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
+    await sayCurrentState(ws, engine);
+  }
+}
 
-        console.log("🧠 Processing speech:", fullBuffer.length);
+async function handleIntentFlow(ws, engine, transcript) {
+  const detected = detectIntent(transcript);
 
-        let transcript = "";
+  debug("📝 Transcript:", transcript);
+  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
 
-        try {
-          const result = await transcribePcmBuffer(fullBuffer);
-          transcript = result.text || "";
-        } catch (err) {
-          console.error("❌ Transcription error:", err.message);
-        }
+  const result = engine.processUserIntent(detected);
 
-        console.log("📝 Transcript:", transcript);
+  if (result.immediateReply) {
+    await speakAndMark(ws, result.immediateReply);
+    return;
+  }
 
-        // 🔥 STATE TRANSITION
-        currentState = nextState(currentState, transcript);
-        console.log("📍 State:", currentState);
+  if (engine.state === STATES.SEND_LINK) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
 
-        let replyText = "";
-
-        try {
-          replyText = await generateReply(transcript, currentState);
-        } catch (err) {
-          console.error("❌ AI error:", err.message);
-        }
-
-        // 🔥 FINAL SAFETY (never silent)
-        if (!replyText) {
-          replyText =
-            "Sure 🙂 main aapko WhatsApp pe details share kar deti hoon.";
-        }
-
-        console.log("🤖 Reply:", replyText);
-
-        await playText(ws, streamSid, replyText);
-      } catch (err) {
-        console.error("❌ flush error:", err.message);
-      } finally {
-        processing = false;
-      }
+  if (engine.state === STATES.CLOSE) {
+    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+      engine.setState(STATES.SEND_LINK);
+      await sayCurrentState(ws, engine);
+      return;
     }
 
-    ws.on("message", async (raw) => {
-      try {
-        const msg = JSON.parse(raw.toString());
+    await sayCurrentState(ws, engine);
+    return;
+  }
 
-        if (msg.event !== "media") {
-          console.log("📡 Event:", msg.event);
-        }
+  if (result.retry) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
 
-        if (msg.event === "start") {
-          streamSid = msg.stream_sid || msg.streamSid;
+  if (engine.state === STATES.MICRO_PITCH) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
 
-          console.log("▶️ Call started:", streamSid);
-          return;
-        }
+  await sayCurrentState(ws, engine);
+}
 
-        if (msg.event === "media") {
-          const payload = msg.media?.payload;
-          if (!payload) return;
+function createAudioCollector() {
+  let chunks = [];
+  let totalBytes = 0;
 
-          // send greeting once
-          if (!greetingStarted && streamSid) {
-            greetingStarted = true;
+  return {
+    push(base64Audio) {
+      if (!base64Audio) return;
+      const buf = Buffer.from(base64Audio, "base64");
+      chunks.push(buf);
+      totalBytes += buf.length;
+    },
 
-            await sendGreeting(ws, streamSid);
-            greetingDone = true;
+    size() {
+      return totalBytes;
+    },
 
-            console.log("✅ Greeting sent");
-            return;
+    consume() {
+      const out = Buffer.concat(chunks);
+      chunks = [];
+      totalBytes = 0;
+      return out;
+    },
+
+    clear() {
+      chunks = [];
+      totalBytes = 0;
+    },
+  };
+}
+
+async function handleVoicebotWs(ws, req, lead = {}) {
+  const engine = new ConversationStateEngine(lead);
+  const audioCollector = createAudioCollector();
+
+  debug("🔌 WebSocket connected");
+  debug("📞 Lead context:", lead);
+
+  await sayCurrentState(ws, engine);
+
+  ws.on("message", async (raw) => {
+    const msg = safeJsonParse(raw);
+    if (!msg) return;
+
+    try {
+      switch (msg.event) {
+        case "connected":
+          debug("📡 Event: connected");
+          break;
+
+        case "start":
+          debug("📡 Event: start");
+          debug("▶️ Call started:", msg.start?.callSid || "");
+          break;
+
+        case "media":
+          if (msg.media?.payload) {
+            audioCollector.push(msg.media.payload);
+          }
+          break;
+
+        case "mark": {
+          debug("📡 Event: mark");
+
+          const size = audioCollector.size();
+          if (!size || size < 4000) {
+            debug("🔇 Not enough audio, treating as silence");
+            await handleIntentFlow(ws, engine, "");
+            audioCollector.clear();
+            break;
           }
 
-          if (!greetingDone) return;
+          const audioBuffer = audioCollector.consume();
+          debug("🧠 Processing speech bytes:", audioBuffer.length);
 
-          const chunk = Buffer.from(payload, "base64");
-          const amplitude = getAverageAmplitude(chunk);
+          const transcript = await transcribeAudioBuffer(audioBuffer);
 
-          if (amplitude > SPEECH_THRESHOLD) {
-            speechStarted = true;
-            silenceFrames = 0;
-            audioBuffer.push(chunk);
-          } else if (speechStarted) {
-            silenceFrames++;
-            audioBuffer.push(chunk);
+          await handleIntentFlow(ws, engine, transcript || "");
+          break;
+        }
 
-            if (silenceFrames >= SILENCE_LIMIT) {
-              await flushUserSpeech();
-            }
+        case "stop":
+          debug("📡 Event: stop");
+          debug("⏹ Call stopped");
+
+          if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+            await sendLinkOnce(engine);
           }
 
-          return;
-        }
+          ws.close();
+          break;
 
-        if (msg.event === "stop") {
-          console.log("⏹ Call stopped");
-          await flushUserSpeech();
-        }
-      } catch (err) {
-        console.error("❌ WS error:", err.message);
+        default:
+          debug("ℹ️ Unhandled event:", msg.event);
+          break;
       }
-    });
+    } catch (err) {
+      console.error("❌ voicebotWs error:", err);
 
-    ws.on("close", () => {
-      console.log("🔌 WebSocket closed");
-    });
+      if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+        await sendLinkOnce(engine);
+      }
 
-    ws.on("error", (err) => {
-      console.error("❌ WS crash:", err.message);
-    });
+      try {
+        await speakAndMark(
+          ws,
+          PROMPTS.silenceFallback()
+        );
+      } catch (e) {
+        console.error("❌ fallback TTS failed:", e.message);
+      }
+    }
+  });
+
+  ws.on("close", async () => {
+    debug("🔌 WebSocket closed");
+    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+      await sendLinkOnce(engine);
+    }
+  });
+
+  ws.on("error", async (err) => {
+    console.error("❌ WebSocket error:", err);
+    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+      await sendLinkOnce(engine);
+    }
   });
 }
 
 module.exports = {
-  attachVoicebotWebSocket,
+  handleVoicebotWs,
 };
