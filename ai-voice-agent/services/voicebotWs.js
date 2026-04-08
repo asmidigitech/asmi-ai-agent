@@ -1,14 +1,10 @@
-// voicebotWs.js
+// services/voicebotWs.js
 
 const { ConversationStateEngine } = require("./stateEngine");
 const { detectIntent } = require("./intent");
 const { PROMPTS } = require("./prompts");
 const { APP, STATES } = require("./config");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
-
-/**
- * Keep these mapped to your existing working helper files.
- */
 const { transcribeAudioBuffer } = require("./stt");
 const { speakAndMark } = require("./tts");
 
@@ -59,7 +55,6 @@ async function sayCurrentState(ws, engine) {
 
   debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
 
-  // Wait for user after these states, except START chain
   if (
     [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
       engine.state
@@ -69,13 +64,11 @@ async function sayCurrentState(ws, engine) {
     return;
   }
 
-  // After START opening, immediately ask permission
   if (current === STATES.START && engine.state === STATES.PERMISSION) {
     await sayCurrentState(ws, engine);
     return;
   }
 
-  // After MICRO_PITCH, automatically send link line
   if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
     await sayCurrentState(ws, engine);
     return;
@@ -155,15 +148,23 @@ function createAudioCollector() {
 }
 
 async function handleVoicebotWs(ws, req, lead = {}) {
-  const engine = new ConversationStateEngine(lead);
+  const engine = new ConversationStateEngine({
+    lead_id: lead.lead_id || null,
+    session_id: lead.session_id || null,
+    name: lead.name || "sir",
+    phone: lead.phone || "",
+    score: lead.score || 0,
+    stage: lead.stage || "",
+    heat: lead.heat || "",
+    niche: lead.niche || "",
+  });
+
   const audioCollector = createAudioCollector();
 
   debug("🔌 WebSocket connected");
-  debug("📞 Lead context:", lead);
+  debug("📞 Lead context:", engine.ctx);
 
-  // IMPORTANT:
-  // Keep first greeting immediately on connection.
-  // This was the earlier working behavior with Exotel.
+  // Speak first line immediately
   await sayCurrentState(ws, engine);
 
   ws.on("message", async (raw) => {
@@ -178,7 +179,15 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
         case "start":
           debug("📡 Event: start");
-          debug("▶️ Call started:", msg.start?.callSid || "");
+
+          // IMPORTANT: store stream id for TTS media streaming
+          ws.streamSid =
+            msg.start?.streamSid ||
+            msg.streamSid ||
+            msg.start?.callSid ||
+            null;
+
+          debug("▶️ Call started:", ws.streamSid || "");
           break;
 
         case "media":
@@ -202,7 +211,6 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           debug("🧠 Processing speech bytes:", audioBuffer.length);
 
           const transcript = await transcribeAudioBuffer(audioBuffer);
-
           await handleIntentFlow(ws, engine, transcript || "");
           break;
         }
@@ -239,6 +247,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
   ws.on("close", async () => {
     debug("🔌 WebSocket closed");
+
     if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
       await sendLinkOnce(engine);
     }
@@ -246,96 +255,25 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
   ws.on("error", async (err) => {
     console.error("❌ WebSocket error:", err);
+
     if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
       await sendLinkOnce(engine);
     }
   });
 }
-async function handleVoicebotWs(ws, req, lead = {}) {
-  const engine = new ConversationStateEngine({
-    lead_id: lead.lead_id || null,
-    session_id: lead.session_id || null,
-    name: lead.name || "sir",
-    phone: lead.phone || "",
-    score: lead.score || 0,
-    stage: lead.stage || "",
-    heat: lead.heat || "",
-    niche: lead.niche || "",
-  });
 
-  const audioCollector = createAudioCollector();
-
-  debug("🔌 WebSocket connected");
-  debug("📞 Lead context:", engine.ctx);
-
-  await sayCurrentState(ws, engine);
-
-  ws.on("message", async (raw) => {
-    const msg = safeJsonParse(raw);
-    if (!msg) return;
-
+function attachVoicebotWebSocket(wss) {
+  wss.on("connection", async (ws, req) => {
     try {
-      switch (msg.event) {
-        case "connected":
-          debug("📡 Event: connected");
-          break;
-
-        case "start":
-          debug("📡 Event: start");
-          debug("▶️ Call started:", msg.start?.callSid || "");
-          break;
-
-        case "media":
-          if (msg.media?.payload) {
-            audioCollector.push(msg.media.payload);
-          }
-          break;
-
-        case "mark": {
-          debug("📡 Event: mark");
-
-          const size = audioCollector.size();
-          if (!size || size < 4000) {
-            debug("🔇 Not enough audio, treating as silence");
-            await handleIntentFlow(ws, engine, "");
-            audioCollector.clear();
-            break;
-          }
-
-          const audioBuffer = audioCollector.consume();
-          debug("🧠 Processing speech bytes:", audioBuffer.length);
-
-          const transcript = await transcribeAudioBuffer(audioBuffer);
-          await handleIntentFlow(ws, engine, transcript || "");
-          break;
-        }
-
-        case "stop":
-          debug("📡 Event: stop");
-          debug("⏹ Call stopped");
-          ws.close();
-          break;
-
-        default:
-          debug("ℹ️ Unhandled event:", msg.event);
-          break;
-      }
+      await handleVoicebotWs(ws, req, {});
     } catch (err) {
-      console.error("❌ voicebotWs error:", err);
+      console.error("❌ attachVoicebotWebSocket error:", err);
+      try {
+        ws.close();
+      } catch (_) {}
     }
   });
-
-  ws.on("close", async () => {
-    debug("🔌 WebSocket closed");
-  });
-
-  ws.on("error", async (err) => {
-    console.error("❌ WebSocket error:", err);
-  });
 }
-
-
-
 
 module.exports = {
   attachVoicebotWebSocket,
