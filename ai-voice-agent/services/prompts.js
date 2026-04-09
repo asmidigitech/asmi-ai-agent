@@ -7,13 +7,13 @@ function fill(text, vars = {}) {
 const PROMPTS = {
   opening(ctx) {
     return fill(
-      "Hi {{name}}, main Riya bol rahi hoon from Digital Elevate, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right?",
+      "Hi {{name}}, main Riya bol rahi hoon from Digital Elevate, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right? Main bas 30 seconds loongi. Ek-do short questions poochke aapko chaar sau ninyanve rupaye wali strategy call ka link WhatsApp par share kar dungi. Theek hai?",
       { name: ctx.name || "sir" }
     );
   },
 
   permission() {
-    return "Main bas 30 seconds loongi. Ek-do short questions poochke aapko chaar sau ninyanve rupaye wali strategy call ka link WhatsApp par share kar dungi. Theek hai?";
+    return "Theek hai, short mein batayiye.";
   },
 
   q1BusinessType() {
@@ -37,7 +37,7 @@ const PROMPTS = {
   },
 
   q3Retry() {
-    return "Short mein batayiye — leads, conversion, ya system/process?";
+    return "Short mein batayiye — leads, conversion, ya system ya process?";
   },
 
   q4Readiness() {
