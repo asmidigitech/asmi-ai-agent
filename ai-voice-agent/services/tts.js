@@ -29,7 +29,7 @@ function sendWsJson(ws, payload) {
   });
 }
 
-async function generateUlawAudioBuffer(text) {
+async function generatePcm16kBuffer(text) {
   const apiKey = requireEnv("ELEVENLABS_API_KEY");
   const voiceId = requireEnv("ELEVENLABS_VOICE_ID");
 
@@ -54,10 +54,10 @@ async function generateUlawAudioBuffer(text) {
       headers: {
         "xi-api-key": apiKey,
         "Content-Type": "application/json",
-        Accept: "audio/basic",
+        Accept: "audio/pcm",
       },
       params: {
-        output_format: "ulaw_8000",
+        output_format: "pcm_16000",
       },
     }
   );
@@ -65,68 +65,42 @@ async function generateUlawAudioBuffer(text) {
   return Buffer.from(response.data);
 }
 
-function stripTelephonyHeaders(buffer) {
-  if (!buffer || !buffer.length) return buffer;
-
-  // AU header: ".snd"
-  if (
-    buffer.length > 24 &&
-    buffer[0] === 0x2e &&
-    buffer[1] === 0x73 &&
-    buffer[2] === 0x6e &&
-    buffer[3] === 0x64
-  ) {
-    const headerOffset = buffer.readUInt32BE(4);
-    if (headerOffset > 0 && headerOffset < buffer.length) {
-      console.log(`✂️ Stripping AU header: ${headerOffset} bytes`);
-      return buffer.subarray(headerOffset);
-    }
+// Downsample signed 16-bit little-endian PCM from 16kHz to 8kHz
+function downsample16kTo8k(pcm16kBuffer) {
+  if (!pcm16kBuffer || pcm16kBuffer.length < 4) {
+    return Buffer.alloc(0);
   }
 
-  // WAV header: "RIFF....WAVE"
-  if (
-    buffer.length > 44 &&
-    buffer.toString("ascii", 0, 4) === "RIFF" &&
-    buffer.toString("ascii", 8, 12) === "WAVE"
-  ) {
-    let offset = 12;
+  // 16-bit PCM => 2 bytes per sample
+  const inputSamples = Math.floor(pcm16kBuffer.length / 2);
+  const outputSamples = Math.floor(inputSamples / 2);
+  const out = Buffer.alloc(outputSamples * 2);
 
-    while (offset + 8 <= buffer.length) {
-      const chunkId = buffer.toString("ascii", offset, offset + 4);
-      const chunkSize = buffer.readUInt32LE(offset + 4);
+  let outOffset = 0;
 
-      if (chunkId === "data") {
-        const dataStart = offset + 8;
-        if (dataStart < buffer.length) {
-          console.log(`✂️ Stripping WAV header: ${dataStart} bytes`);
-          return buffer.subarray(dataStart);
-        }
-      }
-
-      offset += 8 + chunkSize + (chunkSize % 2);
-    }
-
-    // safe fallback if "data" chunk not parsed
-    console.log("✂️ Stripping WAV default header: 44 bytes");
-    return buffer.subarray(44);
+  for (let i = 0; i + 3 < pcm16kBuffer.length; i += 4) {
+    // take every other 16-bit sample
+    out[outOffset] = pcm16kBuffer[i];
+    out[outOffset + 1] = pcm16kBuffer[i + 1];
+    outOffset += 2;
   }
 
-  return buffer;
+  return out.subarray(0, outOffset);
 }
 
-async function sendAudioBufferAsMedia(ws, audioBuffer) {
-  if (!audioBuffer || !audioBuffer.length) return;
+async function sendPcm8kToExotel(ws, pcm8kBuffer) {
+  if (!pcm8kBuffer || !pcm8kBuffer.length) return;
 
-  // 20ms @ 8kHz μ-law mono = 160 bytes
-  const FRAME_SIZE = 160;
+  // Exotel docs: multiples of 320 bytes; minimum chunk size 3.2k recommended
+  const CHUNK_SIZE = 3200;
 
-  for (let i = 0; i < audioBuffer.length; i += FRAME_SIZE) {
-    const frame = audioBuffer.subarray(i, i + FRAME_SIZE);
+  for (let i = 0; i < pcm8kBuffer.length; i += CHUNK_SIZE) {
+    const chunk = pcm8kBuffer.subarray(i, i + CHUNK_SIZE);
 
     const payload = {
       event: "media",
       media: {
-        payload: frame.toString("base64"),
+        payload: chunk.toString("base64"),
       },
     };
 
@@ -135,7 +109,9 @@ async function sendAudioBufferAsMedia(ws, audioBuffer) {
     }
 
     await sendWsJson(ws, payload);
-    await sleep(20);
+
+    // 3200 bytes of 8kHz 16-bit mono PCM = 200ms audio
+    await sleep(200);
   }
 }
 
@@ -162,13 +138,13 @@ async function speakAndMark(ws, text) {
   try {
     console.log("🔊 Generating TTS:", cleanText);
 
-    let audioBuffer = await generateUlawAudioBuffer(cleanText);
-    console.log("📦 TTS bytes before strip:", audioBuffer.length);
+    const pcm16k = await generatePcm16kBuffer(cleanText);
+    console.log("📦 PCM 16k bytes:", pcm16k.length);
 
-    audioBuffer = stripTelephonyHeaders(audioBuffer);
-    console.log("📦 TTS bytes after strip:", audioBuffer.length);
+    const pcm8k = downsample16kTo8k(pcm16k);
+    console.log("📦 PCM 8k bytes:", pcm8k.length);
 
-    await sendAudioBufferAsMedia(ws, audioBuffer);
+    await sendPcm8kToExotel(ws, pcm8k);
     await sendMark(ws);
 
     console.log("✅ Audio streamed successfully");
