@@ -26,40 +26,29 @@ function safeJsonParse(data) {
   }
 }
 
-async function sendLinkOnce(engine) {
-  if (engine.ctx.linkSent) {
-    return { ok: true, skipped: true };
-  }
-
-  const result = await sendWhatsAppPaymentLink(engine.ctx);
-
-  if (result.ok) {
-    engine.markLinkSent();
-    debug("✅ WhatsApp payment link sent:", result.mode, result.status || "");
-  } else {
-    debug("❌ WhatsApp payment link failed:", result.error);
-  }
-
-  return result;
-}
-
-function clearUserSpeechTimer(ws) {
-  if (ws._userSpeechTimer) {
-    clearTimeout(ws._userSpeechTimer);
-    ws._userSpeechTimer = null;
-  }
-}
-
-function clearNoResponseTimer(ws) {
-  if (ws._noResponseTimer) {
-    clearTimeout(ws._noResponseTimer);
-    ws._noResponseTimer = null;
+function clearTimer(refObj, key) {
+  if (refObj[key]) {
+    clearTimeout(refObj[key]);
+    refObj[key] = null;
   }
 }
 
 function clearAllTimers(ws) {
-  clearUserSpeechTimer(ws);
-  clearNoResponseTimer(ws);
+  clearTimer(ws, "_userSpeechTimer");
+  clearTimer(ws, "_noResponseTimer");
+  clearTimer(ws, "_keepAliveTimer");
+}
+
+function scheduleKeepAlive(ws) {
+  clearTimer(ws, "_keepAliveTimer");
+
+  ws._keepAliveTimer = setInterval(() => {
+    if (!ws || ws.readyState !== 1) return;
+    try {
+      debug("🟢 keepalive");
+      // harmless noop marker for log visibility only
+    } catch (_) {}
+  }, Number(process.env.WS_KEEPALIVE_MS || 5000));
 }
 
 function buildEngineFromLead(lead = {}) {
@@ -105,8 +94,72 @@ function createAudioCollector() {
   };
 }
 
+async function sendLinkOnce(engine) {
+  if (engine.ctx.linkSent) {
+    return { ok: true, skipped: true };
+  }
+
+  const result = await sendWhatsAppPaymentLink(engine.ctx);
+
+  if (result.ok) {
+    engine.markLinkSent();
+    debug("✅ WhatsApp payment link sent:", result.mode, result.status || "");
+  } else {
+    debug("❌ WhatsApp payment link failed:", result.error);
+  }
+
+  return result;
+}
+
+async function playBotText(ws, engine, text) {
+  if (!text || !String(text).trim()) return;
+
+  engine.lastBotMessage = text;
+  engine.log({ type: "bot", text });
+
+  ws._isBotSpeaking = true;
+  ws._awaitingUserSpeech = false;
+  ws._hasUserMediaSincePrompt = false;
+  ws._lastBotUtteranceAt = Date.now();
+
+  debug(`🤖 State ${engine.state}: ${text}`);
+  await speakAndMark(ws, text);
+}
+
+async function sayCurrentState(ws, engine) {
+  const text = engine.getCurrentQuestion();
+  await playBotText(ws, engine, text);
+
+  if (engine.state === STATES.SEND_LINK) {
+    await sendLinkOnce(engine);
+  }
+
+  const previousState = engine.state;
+  engine.nextAfterBotUtterance();
+  debug(`📍 Next state after bot utterance: ${engine.state} (from ${previousState})`);
+}
+
+async function handleIntentFlow(ws, engine, transcript) {
+  clearTimer(ws, "_userSpeechTimer");
+  clearTimer(ws, "_noResponseTimer");
+
+  const detected = detectIntent(transcript);
+
+  debug("📝 Transcript:", transcript);
+  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
+
+  const result = engine.processUserIntent(detected);
+
+  if (result.immediateReply) {
+    await playBotText(ws, engine, result.immediateReply);
+    return;
+  }
+
+  await sayCurrentState(ws, engine);
+}
+
 function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
-  clearUserSpeechTimer(ws);
+  clearTimer(ws, "_userSpeechTimer");
 
   ws._userSpeechTimer = setTimeout(async () => {
     try {
@@ -130,10 +183,7 @@ function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
     } catch (err) {
       console.error("❌ user speech processing failed:", err);
       try {
-        ws._isBotSpeaking = true;
-        ws._awaitingUserSpeech = false;
-        ws._hasUserMediaSincePrompt = false;
-        await speakAndMark(ws, PROMPTS.silenceFallback());
+        await playBotText(ws, engine, PROMPTS.silenceFallback());
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
@@ -142,7 +192,7 @@ function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
 }
 
 function scheduleNoResponseTimer(ws, engine) {
-  clearNoResponseTimer(ws);
+  clearTimer(ws, "_noResponseTimer");
 
   ws._noResponseTimer = setTimeout(async () => {
     try {
@@ -153,12 +203,9 @@ function scheduleNoResponseTimer(ws, engine) {
       debug(`⏳ No caller response detected. Count=${ws._noResponseCount}`);
 
       if (ws._noResponseCount === 1) {
-        ws._isBotSpeaking = true;
-        ws._awaitingUserSpeech = false;
-        ws._hasUserMediaSincePrompt = false;
-
-        await speakAndMark(
+        await playBotText(
           ws,
+          engine,
           "Hello, aap meri awaaz sun pa rahe ho? Bas short mein haan ya na bol dijiye."
         );
         return;
@@ -175,58 +222,36 @@ function scheduleNoResponseTimer(ws, engine) {
     } catch (err) {
       console.error("❌ no-response handler failed:", err);
     }
-  }, Number(process.env.USER_RESPONSE_TIMEOUT_MS || 6000));
+  }, Number(process.env.USER_RESPONSE_TIMEOUT_MS || 8000));
 }
 
-async function sayCurrentState(ws, engine) {
-  clearAllTimers(ws);
+async function recoverLeadContext(msg, engine) {
+  const startPayload = msg.start || {};
+  const custom = startPayload.customParameters || {};
+  const sessionId =
+    custom.session_id ||
+    startPayload.session_id ||
+    null;
 
-  const text = engine.getCurrentQuestion();
-  engine.lastBotMessage = text;
-  engine.log({ type: "bot", text });
+  const phoneFromStart = normalizePhone(
+    startPayload.from ||
+    startPayload.From ||
+    custom.phone ||
+    ""
+  );
 
-  debug(`🤖 State ${engine.state}: ${text}`);
+  const recovered =
+    consumeSession(sessionId) ||
+    findByPhone(phoneFromStart) ||
+    consumeLatestPendingSession();
 
-  ws._isBotSpeaking = true;
-  ws._awaitingUserSpeech = false;
-  ws._hasUserMediaSincePrompt = false;
-
-  await speakAndMark(ws, text);
-
-  if (engine.state === STATES.SEND_LINK) {
-    await sendLinkOnce(engine);
+  if (recovered) {
+    debug("✅ Recovered lead context for websocket:", recovered);
+    return buildEngineFromLead(recovered);
   }
 
-  const previousState = engine.state;
-  engine.nextAfterBotUtterance();
-
-  debug(`📍 Next state after bot utterance: ${engine.state} (from ${previousState})`);
-
-  // IMPORTANT:
-  // DO NOT auto-chain START -> PERMISSION anymore.
-  // Opening already includes the permission ask.
-  // Wait for user after mark.
-}
-
-async function handleIntentFlow(ws, engine, transcript) {
-  clearAllTimers(ws);
-
-  const detected = detectIntent(transcript);
-
-  debug("📝 Transcript:", transcript);
-  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
-
-  const result = engine.processUserIntent(detected);
-
-  if (result.immediateReply) {
-    ws._isBotSpeaking = true;
-    ws._awaitingUserSpeech = false;
-    ws._hasUserMediaSincePrompt = false;
-    await speakAndMark(ws, result.immediateReply);
-    return;
-  }
-
-  await sayCurrentState(ws, engine);
+  debug("⚠️ No session recovered; using fallback lead context");
+  return engine;
 }
 
 async function handleVoicebotWs(ws, req, lead = {}) {
@@ -239,10 +264,14 @@ async function handleVoicebotWs(ws, req, lead = {}) {
   ws._hasUserMediaSincePrompt = false;
   ws._userSpeechTimer = null;
   ws._noResponseTimer = null;
+  ws._keepAliveTimer = null;
   ws._noResponseCount = 0;
+  ws._lastBotUtteranceAt = 0;
 
   debug("🔌 WebSocket connected");
   debug("📞 Lead context:", engine.ctx);
+
+  scheduleKeepAlive(ws);
 
   ws.on("message", async (raw) => {
     const msg = safeJsonParse(raw);
@@ -265,31 +294,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
           debug("▶️ Call started:", ws.streamSid || "");
 
-          const startPayload = msg.start || {};
-          const custom = startPayload.customParameters || {};
-          const sessionId =
-            custom.session_id ||
-            startPayload.session_id ||
-            null;
-
-          const phoneFromStart = normalizePhone(
-            startPayload.from ||
-              startPayload.From ||
-              custom.phone ||
-              ""
-          );
-
-          const recovered =
-            consumeSession(sessionId) ||
-            findByPhone(phoneFromStart) ||
-            consumeLatestPendingSession();
-
-          if (recovered) {
-            engine = buildEngineFromLead(recovered);
-            debug("✅ Recovered lead context for websocket:", engine.ctx);
-          } else {
-            debug("⚠️ No session recovered; using fallback lead context");
-          }
+          engine = await recoverLeadContext(msg, engine);
 
           if (!ws._botStarted) {
             ws._botStarted = true;
@@ -307,24 +312,32 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           }
           break;
 
-        case "mark":
+        case "mark": {
           debug("📡 Event: mark");
+
+          // Ignore stale marks that arrive immediately while a newer utterance
+          // may already be in flight.
+          const elapsed = Date.now() - (ws._lastBotUtteranceAt || 0);
+          if (elapsed < 300) {
+            debug("⏭ Ignoring stale/early mark");
+            break;
+          }
+
           ws._isBotSpeaking = false;
           ws._awaitingUserSpeech = true;
           scheduleNoResponseTimer(ws, engine);
           break;
+        }
 
         case "stop":
           debug("📡 Event: stop");
           debug("⏹ Call stopped");
-
+          // Do not call ws.close() here; Exotel already ended the stream.
           clearAllTimers(ws);
 
           if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
             await sendLinkOnce(engine);
           }
-
-          ws.close();
           break;
 
         default:
@@ -339,10 +352,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
       }
 
       try {
-        ws._isBotSpeaking = true;
-        ws._awaitingUserSpeech = false;
-        ws._hasUserMediaSincePrompt = false;
-        await speakAndMark(ws, PROMPTS.silenceFallback());
+        await playBotText(ws, engine, PROMPTS.silenceFallback());
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
@@ -375,6 +385,7 @@ function attachVoicebotWebSocket(wss) {
     } catch (err) {
       console.error("❌ attachVoicebotWebSocket error:", err);
       try {
+        // last-resort close only on fatal attach failure
         ws.close();
       } catch (_) {}
     }
