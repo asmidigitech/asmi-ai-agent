@@ -50,6 +50,9 @@ async function sayCurrentState(ws, engine) {
 
   debug(`🤖 State ${engine.state}: ${text}`);
 
+  ws._isBotSpeaking = true;
+  ws._awaitingUserSpeech = false;
+
   await speakAndMark(ws, text);
 
   if (engine.state === STATES.SEND_LINK) {
@@ -60,6 +63,9 @@ async function sayCurrentState(ws, engine) {
   engine.nextAfterBotUtterance();
 
   debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
+
+  // After bot finishes, now wait for user
+  ws._awaitingUserSpeech = true;
 
   if (
     [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
@@ -90,7 +96,10 @@ async function handleIntentFlow(ws, engine, transcript) {
   const result = engine.processUserIntent(detected);
 
   if (result.immediateReply) {
+    ws._isBotSpeaking = true;
+    ws._awaitingUserSpeech = false;
     await speakAndMark(ws, result.immediateReply);
+    ws._awaitingUserSpeech = true;
     return;
   }
 
@@ -170,10 +179,12 @@ async function handleVoicebotWs(ws, req, lead = {}) {
   let engine = buildEngineFromLead(lead);
   const audioCollector = createAudioCollector();
 
+  ws._botStarted = false;
+  ws._isBotSpeaking = false;
+  ws._awaitingUserSpeech = false;
+
   debug("🔌 WebSocket connected");
   debug("📞 Lead context:", engine.ctx);
-
-  ws._botStarted = false;
 
   ws.on("message", async (raw) => {
     const msg = safeJsonParse(raw);
@@ -196,7 +207,6 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
           debug("▶️ Call started:", ws.streamSid || "");
 
-          // Try to recover lead context from session store
           const startPayload = msg.start || {};
           const custom = startPayload.customParameters || {};
           const sessionId =
@@ -204,13 +214,12 @@ async function handleVoicebotWs(ws, req, lead = {}) {
             startPayload.session_id ||
             null;
 
-          const phoneFromStart =
-            normalizePhone(
-              startPayload.from ||
+          const phoneFromStart = normalizePhone(
+            startPayload.from ||
               startPayload.From ||
               custom.phone ||
               ""
-            );
+          );
 
           let recovered =
             consumeSession(sessionId) ||
@@ -232,29 +241,19 @@ async function handleVoicebotWs(ws, req, lead = {}) {
         }
 
         case "media":
-          if (msg.media?.payload) {
+          // Only collect caller media when bot is NOT speaking and we are waiting for user
+          if (msg.media?.payload && !ws._isBotSpeaking && ws._awaitingUserSpeech) {
             audioCollector.push(msg.media.payload);
           }
           break;
 
-        case "mark": {
+        case "mark":
           debug("📡 Event: mark");
 
-          const size = audioCollector.size();
-          if (!size || size < 4000) {
-            debug("🔇 Not enough audio, treating as silence");
-            await handleIntentFlow(ws, engine, "");
-            audioCollector.clear();
-            break;
-          }
-
-          const audioBuffer = audioCollector.consume();
-          debug("🧠 Processing speech bytes:", audioBuffer.length);
-
-          const transcript = await transcribeAudioBuffer(audioBuffer);
-          await handleIntentFlow(ws, engine, transcript || "");
+          // This mark is from our own bot playback completion.
+          // Do NOT process it as user speech.
+          ws._isBotSpeaking = false;
           break;
-        }
 
         case "stop":
           debug("📡 Event: stop");
@@ -279,12 +278,17 @@ async function handleVoicebotWs(ws, req, lead = {}) {
       }
 
       try {
+        ws._isBotSpeaking = true;
+        ws._awaitingUserSpeech = false;
         await speakAndMark(ws, PROMPTS.silenceFallback());
+        ws._awaitingUserSpeech = true;
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
     }
   });
+
+  // Optional: if you later want silence timeout-based STT, add it here, not on mark.
 
   ws.on("close", async () => {
     debug("🔌 WebSocket closed");
