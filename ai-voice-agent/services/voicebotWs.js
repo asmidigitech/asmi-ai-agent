@@ -1,281 +1,183 @@
-// services/voicebotWs.js
+// services/tts.js
 
-const { ConversationStateEngine } = require("./stateEngine");
-const { detectIntent } = require("./intent");
-const { PROMPTS } = require("./prompts");
-const { APP, STATES } = require("./config");
-const { sendWhatsAppPaymentLink } = require("./linkSender");
-const { transcribeAudioBuffer } = require("./stt");
-const { speakAndMark } = require("./tts");
+const axios = require("axios");
 
-function debug(...args) {
-  if (APP.DEBUG) console.log(...args);
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env: ${name}`);
+  }
+  return value;
 }
 
-function safeJsonParse(data) {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
+function getEnv(name, fallback = "") {
+  return process.env[name] || fallback;
 }
 
-async function sendLinkOnce(engine) {
-  if (engine.ctx.linkSent) {
-    return { ok: true, skipped: true };
-  }
-
-  const result = await sendWhatsAppPaymentLink(engine.ctx);
-
-  if (result.ok) {
-    engine.markLinkSent();
-    debug("✅ WhatsApp payment link sent:", result.mode, result.status || "");
-  } else {
-    debug("❌ WhatsApp payment link failed:", result.error);
-  }
-
-  return result;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sayCurrentState(ws, engine) {
-  const text = engine.getCurrentQuestion();
-  engine.lastBotMessage = text;
-  engine.log({ type: "bot", text });
+function sendWsJson(ws, payload) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== 1) return resolve();
 
-  debug(`🤖 State ${engine.state}: ${text}`);
+    ws.send(JSON.stringify(payload), (err) => {
+      if (err) return reject(err);
+      resolve();
+    });
+  });
+}
 
-  await speakAndMark(ws, text);
+async function generateUlawAudioBuffer(text) {
+  const apiKey = requireEnv("ELEVENLABS_API_KEY");
+  const voiceId = requireEnv("ELEVENLABS_VOICE_ID");
 
-  if (engine.state === STATES.SEND_LINK) {
-    await sendLinkOnce(engine);
-  }
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
 
-  const current = engine.state;
-  engine.nextAfterBotUtterance();
+  const response = await axios.post(
+    url,
+    {
+      text,
+      model_id: getEnv("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2"),
+      voice_settings: {
+        stability: Number(getEnv("ELEVENLABS_STABILITY", "0.45")),
+        similarity_boost: Number(getEnv("ELEVENLABS_SIMILARITY_BOOST", "0.75")),
+        style: Number(getEnv("ELEVENLABS_STYLE", "0.2")),
+        use_speaker_boost:
+          String(getEnv("ELEVENLABS_SPEAKER_BOOST", "true")) === "true",
+      },
+    },
+    {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/basic",
+      },
+      params: {
+        output_format: "ulaw_8000",
+      },
+    }
+  );
 
-  debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
+  return Buffer.from(response.data);
+}
 
+function stripTelephonyHeaders(buffer) {
+  if (!buffer || !buffer.length) return buffer;
+
+  // AU header: ".snd"
   if (
-    [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
-      engine.state
-    ) &&
-    current !== STATES.START
+    buffer.length > 24 &&
+    buffer[0] === 0x2e &&
+    buffer[1] === 0x73 &&
+    buffer[2] === 0x6e &&
+    buffer[3] === 0x64
   ) {
-    return;
+    const headerOffset = buffer.readUInt32BE(4);
+    if (headerOffset > 0 && headerOffset < buffer.length) {
+      console.log(`✂️ Stripping AU header: ${headerOffset} bytes`);
+      return buffer.subarray(headerOffset);
+    }
   }
 
-  if (current === STATES.START && engine.state === STATES.PERMISSION) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
+  // WAV header: "RIFF....WAVE"
+  if (
+    buffer.length > 44 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WAVE"
+  ) {
+    let offset = 12;
 
-  if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-}
+    while (offset + 8 <= buffer.length) {
+      const chunkId = buffer.toString("ascii", offset, offset + 4);
+      const chunkSize = buffer.readUInt32LE(offset + 4);
 
-async function handleIntentFlow(ws, engine, transcript) {
-  const detected = detectIntent(transcript);
+      if (chunkId === "data") {
+        const dataStart = offset + 8;
+        if (dataStart < buffer.length) {
+          console.log(`✂️ Stripping WAV header: ${dataStart} bytes`);
+          return buffer.subarray(dataStart);
+        }
+      }
 
-  debug("📝 Transcript:", transcript);
-  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
-
-  const result = engine.processUserIntent(detected);
-
-  if (result.immediateReply) {
-    await speakAndMark(ws, result.immediateReply);
-    return;
-  }
-
-  if (engine.state === STATES.SEND_LINK) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  if (engine.state === STATES.CLOSE) {
-    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-      engine.setState(STATES.SEND_LINK);
-      await sayCurrentState(ws, engine);
-      return;
+      offset += 8 + chunkSize + (chunkSize % 2);
     }
 
-    await sayCurrentState(ws, engine);
-    return;
+    // safe fallback if "data" chunk not parsed
+    console.log("✂️ Stripping WAV default header: 44 bytes");
+    return buffer.subarray(44);
   }
 
-  if (result.retry) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  if (engine.state === STATES.MICRO_PITCH) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  await sayCurrentState(ws, engine);
+  return buffer;
 }
 
-function createAudioCollector() {
-  let chunks = [];
-  let totalBytes = 0;
+async function sendAudioBufferAsMedia(ws, audioBuffer) {
+  if (!audioBuffer || !audioBuffer.length) return;
 
-  return {
-    push(base64Audio) {
-      if (!base64Audio) return;
-      const buf = Buffer.from(base64Audio, "base64");
-      chunks.push(buf);
-      totalBytes += buf.length;
-    },
+  // 20ms @ 8kHz μ-law mono = 160 bytes
+  const FRAME_SIZE = 160;
 
-    size() {
-      return totalBytes;
-    },
+  for (let i = 0; i < audioBuffer.length; i += FRAME_SIZE) {
+    const frame = audioBuffer.subarray(i, i + FRAME_SIZE);
 
-    consume() {
-      const out = Buffer.concat(chunks);
-      chunks = [];
-      totalBytes = 0;
-      return out;
-    },
+    const payload = {
+      event: "media",
+      media: {
+        payload: frame.toString("base64"),
+      },
+    };
 
-    clear() {
-      chunks = [];
-      totalBytes = 0;
+    if (ws.streamSid) {
+      payload.streamSid = ws.streamSid;
+    }
+
+    await sendWsJson(ws, payload);
+    await sleep(20);
+  }
+}
+
+async function sendMark(ws, label = "tts_complete") {
+  const payload = {
+    event: "mark",
+    mark: {
+      name: label,
     },
   };
+
+  if (ws.streamSid) {
+    payload.streamSid = ws.streamSid;
+  }
+
+  await sendWsJson(ws, payload);
 }
 
-async function handleVoicebotWs(ws, req, lead = {}) {
-  const engine = new ConversationStateEngine({
-    lead_id: lead.lead_id || null,
-    session_id: lead.session_id || null,
-    name: lead.name || "sir",
-    phone: lead.phone || "",
-    score: lead.score || 0,
-    stage: lead.stage || "",
-    heat: lead.heat || "",
-    niche: lead.niche || "",
-  });
+async function speakAndMark(ws, text) {
+  const cleanText = String(text || "").trim();
+  if (!cleanText) return;
+  if (!ws || ws.readyState !== 1) return;
 
-  const audioCollector = createAudioCollector();
+  try {
+    console.log("🔊 Generating TTS:", cleanText);
 
-  debug("🔌 WebSocket connected");
-  debug("📞 Lead context:", engine.ctx);
+    let audioBuffer = await generateUlawAudioBuffer(cleanText);
+    console.log("📦 TTS bytes before strip:", audioBuffer.length);
 
-  // Speak first line immediately
-  await sayCurrentState(ws, engine);
+    audioBuffer = stripTelephonyHeaders(audioBuffer);
+    console.log("📦 TTS bytes after strip:", audioBuffer.length);
 
-  ws.on("message", async (raw) => {
-    const msg = safeJsonParse(raw);
-    if (!msg) return;
+    await sendAudioBufferAsMedia(ws, audioBuffer);
+    await sendMark(ws);
 
-    try {
-      switch (msg.event) {
-        case "connected":
-          debug("📡 Event: connected");
-          break;
-
-        case "start":
-          debug("📡 Event: start");
-
-          // IMPORTANT: store stream id for TTS media streaming
-          ws.streamSid =
-            msg.start?.streamSid ||
-            msg.streamSid ||
-            msg.start?.callSid ||
-            null;
-
-          debug("▶️ Call started:", ws.streamSid || "");
-          break;
-
-        case "media":
-          if (msg.media?.payload) {
-            audioCollector.push(msg.media.payload);
-          }
-          break;
-
-        case "mark": {
-          debug("📡 Event: mark");
-
-          const size = audioCollector.size();
-          if (!size || size < 4000) {
-            debug("🔇 Not enough audio, treating as silence");
-            await handleIntentFlow(ws, engine, "");
-            audioCollector.clear();
-            break;
-          }
-
-          const audioBuffer = audioCollector.consume();
-          debug("🧠 Processing speech bytes:", audioBuffer.length);
-
-          const transcript = await transcribeAudioBuffer(audioBuffer);
-          await handleIntentFlow(ws, engine, transcript || "");
-          break;
-        }
-
-        case "stop":
-          debug("📡 Event: stop");
-          debug("⏹ Call stopped");
-
-          if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-            await sendLinkOnce(engine);
-          }
-
-          ws.close();
-          break;
-
-        default:
-          debug("ℹ️ Unhandled event:", msg.event);
-          break;
-      }
-    } catch (err) {
-      console.error("❌ voicebotWs error:", err);
-
-      if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-        await sendLinkOnce(engine);
-      }
-
-      try {
-        await speakAndMark(ws, PROMPTS.silenceFallback());
-      } catch (e) {
-        console.error("❌ fallback TTS failed:", e.message);
-      }
-    }
-  });
-
-  ws.on("close", async () => {
-    debug("🔌 WebSocket closed");
-
-    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-      await sendLinkOnce(engine);
-    }
-  });
-
-  ws.on("error", async (err) => {
-    console.error("❌ WebSocket error:", err);
-
-    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-      await sendLinkOnce(engine);
-    }
-  });
-}
-
-function attachVoicebotWebSocket(wss) {
-  wss.on("connection", async (ws, req) => {
-    try {
-      await handleVoicebotWs(ws, req, {});
-    } catch (err) {
-      console.error("❌ attachVoicebotWebSocket error:", err);
-      try {
-        ws.close();
-      } catch (_) {}
-    }
-  });
+    console.log("✅ Audio streamed successfully");
+  } catch (err) {
+    console.error("❌ TTS failed:", err.response?.data || err.message || err);
+    throw err;
+  }
 }
 
 module.exports = {
-  attachVoicebotWebSocket,
-  handleVoicebotWs,
+  speakAndMark,
 };
