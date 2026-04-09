@@ -1,4 +1,4 @@
-// stateEngine.js
+// services/stateEngine.js
 
 const { APP, STATES, INTENTS } = require("./config");
 const { PROMPTS } = require("./prompts");
@@ -109,6 +109,7 @@ class ConversationStateEngine {
   nextAfterBotUtterance() {
     switch (this.state) {
       case STATES.START:
+        // After combined opening, wait for user response in PERMISSION state
         this.state = STATES.PERMISSION;
         break;
       case STATES.MICRO_PITCH:
@@ -130,16 +131,6 @@ class ConversationStateEngine {
       this.ctx.linkSent = true;
       this.ctx.linkSentAt = new Date().toISOString();
     }
-  }
-
-  forceSendLinkAndClose(reason = "soft") {
-    this.ctx.closedReason = reason;
-    if (!this.ctx.linkSent && APP.AUTO_SEND_LINK_ON_EXIT) {
-      this.state = STATES.SEND_LINK;
-      return { action: "SEND_LINK_FIRST" };
-    }
-    this.state = STATES.CLOSE;
-    return { action: "CLOSE_NOW" };
   }
 
   processUserIntent(result = { intent: INTENTS.UNKNOWN, raw: "" }) {
@@ -220,26 +211,19 @@ class ConversationStateEngine {
 
       case STATES.Q2_NICHE:
         if (intent === INTENTS.AGENCY) this.ctx.nicheBucket = "agency";
-        else if (intent === INTENTS.REAL_ESTATE)
-          this.ctx.nicheBucket = "real_estate";
-        else if (intent === INTENTS.COACH)
-          this.ctx.nicheBucket = "coach_consultant";
-        else if (intent === INTENTS.LOCAL_BUSINESS)
-          this.ctx.nicheBucket = "local_business";
-        else if (intent === INTENTS.ECOMMERCE)
-          this.ctx.nicheBucket = "ecommerce";
+        else if (intent === INTENTS.REAL_ESTATE) this.ctx.nicheBucket = "real_estate";
+        else if (intent === INTENTS.COACH) this.ctx.nicheBucket = "coach_consultant";
+        else if (intent === INTENTS.LOCAL_BUSINESS) this.ctx.nicheBucket = "local_business";
+        else if (intent === INTENTS.ECOMMERCE) this.ctx.nicheBucket = "ecommerce";
         else this.ctx.nicheBucket = "other";
 
         this.state = STATES.Q3_CHALLENGE;
         return { nextState: this.state };
 
       case STATES.Q3_CHALLENGE:
-        if (intent === INTENTS.LEAD_PROBLEM)
-          this.ctx.problemType = "lead_generation";
-        else if (intent === INTENTS.CONVERSION_PROBLEM)
-          this.ctx.problemType = "low_conversion";
-        else if (intent === INTENTS.SYSTEM_PROBLEM)
-          this.ctx.problemType = "operations_system";
+        if (intent === INTENTS.LEAD_PROBLEM) this.ctx.problemType = "lead_generation";
+        else if (intent === INTENTS.CONVERSION_PROBLEM) this.ctx.problemType = "low_conversion";
+        else if (intent === INTENTS.SYSTEM_PROBLEM) this.ctx.problemType = "operations_system";
         else this.ctx.problemType = "unclear";
 
         this.state = STATES.Q4_READINESS;
@@ -249,10 +233,7 @@ class ConversationStateEngine {
         if (intent === INTENTS.READY || intent === INTENTS.AFFIRMATIVE) {
           this.ctx.readiness = "ready";
           this.state = STATES.MICRO_PITCH;
-        } else if (
-          intent === INTENTS.NOT_READY ||
-          intent === INTENTS.NEGATIVE
-        ) {
+        } else if (intent === INTENTS.NOT_READY || intent === INTENTS.NEGATIVE) {
           this.ctx.readiness = "not_ready";
           this.ctx.closedReason = "soft";
           this.state = STATES.SEND_LINK;
