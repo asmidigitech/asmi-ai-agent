@@ -43,92 +43,36 @@ async function sendLinkOnce(engine) {
   return result;
 }
 
-async function sayCurrentState(ws, engine) {
-  const text = engine.getCurrentQuestion();
-  engine.lastBotMessage = text;
-  engine.log({ type: "bot", text });
-
-  debug(`🤖 State ${engine.state}: ${text}`);
-
-  ws._isBotSpeaking = true;
-  ws._awaitingUserSpeech = false;
-
-  await speakAndMark(ws, text);
-
-  if (engine.state === STATES.SEND_LINK) {
-    await sendLinkOnce(engine);
-  }
-
-  const current = engine.state;
-  engine.nextAfterBotUtterance();
-
-  debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
-
-  ws._awaitingUserSpeech = true;
-
-  if (
-    [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
-      engine.state
-    ) &&
-    current !== STATES.START
-  ) {
-    return;
-  }
-
-  if (current === STATES.START && engine.state === STATES.PERMISSION) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
-    await sayCurrentState(ws, engine);
-    return;
+function clearUserSpeechTimer(ws) {
+  if (ws._userSpeechTimer) {
+    clearTimeout(ws._userSpeechTimer);
+    ws._userSpeechTimer = null;
   }
 }
 
-async function handleIntentFlow(ws, engine, transcript) {
-  const detected = detectIntent(transcript);
-
-  debug("📝 Transcript:", transcript);
-  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
-
-  const result = engine.processUserIntent(detected);
-
-  if (result.immediateReply) {
-    ws._isBotSpeaking = true;
-    ws._awaitingUserSpeech = false;
-    await speakAndMark(ws, result.immediateReply);
-    ws._awaitingUserSpeech = true;
-    return;
+function clearNoResponseTimer(ws) {
+  if (ws._noResponseTimer) {
+    clearTimeout(ws._noResponseTimer);
+    ws._noResponseTimer = null;
   }
+}
 
-  if (engine.state === STATES.SEND_LINK) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
+function clearAllTimers(ws) {
+  clearUserSpeechTimer(ws);
+  clearNoResponseTimer(ws);
+}
 
-  if (engine.state === STATES.CLOSE) {
-    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
-      engine.setState(STATES.SEND_LINK);
-      await sayCurrentState(ws, engine);
-      return;
-    }
-
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  if (result.retry) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  if (engine.state === STATES.MICRO_PITCH) {
-    await sayCurrentState(ws, engine);
-    return;
-  }
-
-  await sayCurrentState(ws, engine);
+function buildEngineFromLead(lead = {}) {
+  return new ConversationStateEngine({
+    lead_id: lead.lead_id || null,
+    session_id: lead.session_id || null,
+    name: lead.name || "sir",
+    phone: lead.phone || "",
+    score: Number(lead.score || 0),
+    stage: lead.stage || "",
+    heat: lead.heat || "",
+    niche: lead.niche || "",
+  });
 }
 
 function createAudioCollector() {
@@ -161,24 +105,102 @@ function createAudioCollector() {
   };
 }
 
-function buildEngineFromLead(lead = {}) {
-  return new ConversationStateEngine({
-    lead_id: lead.lead_id || null,
-    session_id: lead.session_id || null,
-    name: lead.name || "sir",
-    phone: lead.phone || "",
-    score: Number(lead.score || 0),
-    stage: lead.stage || "",
-    heat: lead.heat || "",
-    niche: lead.niche || "",
-  });
+async function sayCurrentState(ws, engine) {
+  clearAllTimers(ws);
+
+  const text = engine.getCurrentQuestion();
+  engine.lastBotMessage = text;
+  engine.log({ type: "bot", text });
+
+  debug(`🤖 State ${engine.state}: ${text}`);
+
+  ws._isBotSpeaking = true;
+  ws._awaitingUserSpeech = false;
+  ws._hasUserMediaSincePrompt = false;
+
+  await speakAndMark(ws, text);
+
+  if (engine.state === STATES.SEND_LINK) {
+    await sendLinkOnce(engine);
+  }
+
+  const current = engine.state;
+  engine.nextAfterBotUtterance();
+
+  debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
+
+  ws._awaitingUserSpeech = true;
+  ws._promptStartedAt = Date.now();
+
+  // Start no-response timeout after every prompt that expects user input
+  scheduleNoResponseTimer(ws, engine);
+
+  if (
+    [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
+      engine.state
+    ) &&
+    current !== STATES.START
+  ) {
+    return;
+  }
+
+  if (current === STATES.START && engine.state === STATES.PERMISSION) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
+
+  if (current === STATES.MICRO_PITCH && engine.state === STATES.SEND_LINK) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
 }
 
-function clearUserSpeechTimer(ws) {
-  if (ws._userSpeechTimer) {
-    clearTimeout(ws._userSpeechTimer);
-    ws._userSpeechTimer = null;
+async function handleIntentFlow(ws, engine, transcript) {
+  clearAllTimers(ws);
+
+  const detected = detectIntent(transcript);
+
+  debug("📝 Transcript:", transcript);
+  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
+
+  const result = engine.processUserIntent(detected);
+
+  if (result.immediateReply) {
+    ws._isBotSpeaking = true;
+    ws._awaitingUserSpeech = false;
+    await speakAndMark(ws, result.immediateReply);
+    ws._awaitingUserSpeech = true;
+    scheduleNoResponseTimer(ws, engine);
+    return;
   }
+
+  if (engine.state === STATES.SEND_LINK) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
+
+  if (engine.state === STATES.CLOSE) {
+    if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
+      engine.setState(STATES.SEND_LINK);
+      await sayCurrentState(ws, engine);
+      return;
+    }
+
+    await sayCurrentState(ws, engine);
+    return;
+  }
+
+  if (result.retry) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
+
+  if (engine.state === STATES.MICRO_PITCH) {
+    await sayCurrentState(ws, engine);
+    return;
+  }
+
+  await sayCurrentState(ws, engine);
 }
 
 function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
@@ -212,11 +234,52 @@ function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
         ws._awaitingUserSpeech = false;
         await speakAndMark(ws, PROMPTS.silenceFallback());
         ws._awaitingUserSpeech = true;
+        scheduleNoResponseTimer(ws, engine);
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
     }
   }, Number(process.env.USER_SPEECH_SILENCE_MS || 1200));
+}
+
+function scheduleNoResponseTimer(ws, engine) {
+  clearNoResponseTimer(ws);
+
+  ws._noResponseTimer = setTimeout(async () => {
+    try {
+      if (ws._isBotSpeaking || !ws._awaitingUserSpeech) return;
+      if (ws._hasUserMediaSincePrompt) return;
+
+      ws._noResponseCount = (ws._noResponseCount || 0) + 1;
+
+      debug(`⏳ No caller response detected. Count=${ws._noResponseCount}`);
+
+      if (ws._noResponseCount === 1) {
+        // One gentle reprompt
+        ws._isBotSpeaking = true;
+        ws._awaitingUserSpeech = false;
+        await speakAndMark(
+          ws,
+          "Hello, aap meri awaaz sun pa rahe ho? Bas short reply dijiye."
+        );
+        ws._awaitingUserSpeech = true;
+        scheduleNoResponseTimer(ws, engine);
+        return;
+      }
+
+      // Second no-response: move forward instead of going silent
+      if (!engine.ctx.linkSent) {
+        engine.setState(STATES.SEND_LINK);
+        await sayCurrentState(ws, engine);
+        return;
+      }
+
+      engine.setState(STATES.CLOSE);
+      await sayCurrentState(ws, engine);
+    } catch (err) {
+      console.error("❌ no-response handler failed:", err);
+    }
+  }, Number(process.env.USER_RESPONSE_TIMEOUT_MS || 6000));
 }
 
 async function handleVoicebotWs(ws, req, lead = {}) {
@@ -226,7 +289,10 @@ async function handleVoicebotWs(ws, req, lead = {}) {
   ws._botStarted = false;
   ws._isBotSpeaking = false;
   ws._awaitingUserSpeech = false;
+  ws._hasUserMediaSincePrompt = false;
   ws._userSpeechTimer = null;
+  ws._noResponseTimer = null;
+  ws._noResponseCount = 0;
 
   debug("🔌 WebSocket connected");
   debug("📞 Lead context:", engine.ctx);
@@ -287,6 +353,8 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
         case "media":
           if (msg.media?.payload && !ws._isBotSpeaking && ws._awaitingUserSpeech) {
+            ws._hasUserMediaSincePrompt = true;
+            ws._noResponseCount = 0;
             audioCollector.push(msg.media.payload);
             scheduleUserSpeechProcessing(ws, engine, audioCollector);
           }
@@ -301,7 +369,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           debug("📡 Event: stop");
           debug("⏹ Call stopped");
 
-          clearUserSpeechTimer(ws);
+          clearAllTimers(ws);
 
           if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
             await sendLinkOnce(engine);
@@ -326,6 +394,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
         ws._awaitingUserSpeech = false;
         await speakAndMark(ws, PROMPTS.silenceFallback());
         ws._awaitingUserSpeech = true;
+        scheduleNoResponseTimer(ws, engine);
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
@@ -334,7 +403,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
   ws.on("close", async () => {
     debug("🔌 WebSocket closed");
-    clearUserSpeechTimer(ws);
+    clearAllTimers(ws);
 
     if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
       await sendLinkOnce(engine);
@@ -343,7 +412,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
   ws.on("error", async (err) => {
     console.error("❌ WebSocket error:", err);
-    clearUserSpeechTimer(ws);
+    clearAllTimers(ws);
 
     if (APP.AUTO_SEND_LINK_ON_EXIT && !engine.ctx.linkSent) {
       await sendLinkOnce(engine);
