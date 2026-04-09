@@ -7,6 +7,12 @@ const { APP, STATES } = require("./config");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
 const { transcribeAudioBuffer } = require("./stt");
 const { speakAndMark } = require("./tts");
+const {
+  consumeSession,
+  findByPhone,
+  consumeLatestPendingSession,
+  normalizePhone,
+} = require("./sessionStore");
 
 function debug(...args) {
   if (APP.DEBUG) console.log(...args);
@@ -147,18 +153,21 @@ function createAudioCollector() {
   };
 }
 
-async function handleVoicebotWs(ws, req, lead = {}) {
-  const engine = new ConversationStateEngine({
+function buildEngineFromLead(lead = {}) {
+  return new ConversationStateEngine({
     lead_id: lead.lead_id || null,
     session_id: lead.session_id || null,
     name: lead.name || "sir",
     phone: lead.phone || "",
-    score: lead.score || 0,
+    score: Number(lead.score || 0),
     stage: lead.stage || "",
     heat: lead.heat || "",
     niche: lead.niche || "",
   });
+}
 
+async function handleVoicebotWs(ws, req, lead = {}) {
+  let engine = buildEngineFromLead(lead);
   const audioCollector = createAudioCollector();
 
   debug("🔌 WebSocket connected");
@@ -176,7 +185,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           debug("📡 Event: connected");
           break;
 
-        case "start":
+        case "start": {
           debug("📡 Event: start");
 
           ws.streamSid =
@@ -187,11 +196,40 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
           debug("▶️ Call started:", ws.streamSid || "");
 
+          // Try to recover lead context from session store
+          const startPayload = msg.start || {};
+          const custom = startPayload.customParameters || {};
+          const sessionId =
+            custom.session_id ||
+            startPayload.session_id ||
+            null;
+
+          const phoneFromStart =
+            normalizePhone(
+              startPayload.from ||
+              startPayload.From ||
+              custom.phone ||
+              ""
+            );
+
+          let recovered =
+            consumeSession(sessionId) ||
+            findByPhone(phoneFromStart) ||
+            consumeLatestPendingSession();
+
+          if (recovered) {
+            engine = buildEngineFromLead(recovered);
+            debug("✅ Recovered lead context for websocket:", engine.ctx);
+          } else {
+            debug("⚠️ No session recovered; using fallback lead context");
+          }
+
           if (!ws._botStarted) {
             ws._botStarted = true;
             await sayCurrentState(ws, engine);
           }
           break;
+        }
 
         case "media":
           if (msg.media?.payload) {
