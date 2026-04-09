@@ -129,11 +129,9 @@ async function sayCurrentState(ws, engine) {
 
   debug(`📍 Next state after bot utterance: ${engine.state} (from ${current})`);
 
-  ws._awaitingUserSpeech = true;
-  ws._promptStartedAt = Date.now();
-
-  // Start no-response timeout after every prompt that expects user input
-  scheduleNoResponseTimer(ws, engine);
+  // IMPORTANT:
+  // do NOT start no-response timer here.
+  // Start it only when Exotel sends MARK, meaning playback truly ended.
 
   if (
     [STATES.PERMISSION, STATES.COMMITMENT_CHECK, STATES.CLOSE].includes(
@@ -168,9 +166,9 @@ async function handleIntentFlow(ws, engine, transcript) {
   if (result.immediateReply) {
     ws._isBotSpeaking = true;
     ws._awaitingUserSpeech = false;
+    ws._hasUserMediaSincePrompt = false;
+
     await speakAndMark(ws, result.immediateReply);
-    ws._awaitingUserSpeech = true;
-    scheduleNoResponseTimer(ws, engine);
     return;
   }
 
@@ -229,12 +227,13 @@ function scheduleUserSpeechProcessing(ws, engine, audioCollector) {
       await handleIntentFlow(ws, engine, transcript || "");
     } catch (err) {
       console.error("❌ user speech processing failed:", err);
+
       try {
         ws._isBotSpeaking = true;
         ws._awaitingUserSpeech = false;
+        ws._hasUserMediaSincePrompt = false;
+
         await speakAndMark(ws, PROMPTS.silenceFallback());
-        ws._awaitingUserSpeech = true;
-        scheduleNoResponseTimer(ws, engine);
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
@@ -255,19 +254,17 @@ function scheduleNoResponseTimer(ws, engine) {
       debug(`⏳ No caller response detected. Count=${ws._noResponseCount}`);
 
       if (ws._noResponseCount === 1) {
-        // One gentle reprompt
         ws._isBotSpeaking = true;
         ws._awaitingUserSpeech = false;
+        ws._hasUserMediaSincePrompt = false;
+
         await speakAndMark(
           ws,
-          "Hello, aap meri awaaz sun pa rahe ho? Bas short reply dijiye."
+          "Hello, aap meri awaaz sun pa rahe ho? Bas short mein haan ya na bol dijiye."
         );
-        ws._awaitingUserSpeech = true;
-        scheduleNoResponseTimer(ws, engine);
         return;
       }
 
-      // Second no-response: move forward instead of going silent
       if (!engine.ctx.linkSent) {
         engine.setState(STATES.SEND_LINK);
         await sayCurrentState(ws, engine);
@@ -362,7 +359,13 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
         case "mark":
           debug("📡 Event: mark");
+
+          // Playback actually finished here
           ws._isBotSpeaking = false;
+          ws._awaitingUserSpeech = true;
+
+          // Start waiting window only NOW
+          scheduleNoResponseTimer(ws, engine);
           break;
 
         case "stop":
@@ -392,9 +395,9 @@ async function handleVoicebotWs(ws, req, lead = {}) {
       try {
         ws._isBotSpeaking = true;
         ws._awaitingUserSpeech = false;
+        ws._hasUserMediaSincePrompt = false;
+
         await speakAndMark(ws, PROMPTS.silenceFallback());
-        ws._awaitingUserSpeech = true;
-        scheduleNoResponseTimer(ws, engine);
       } catch (e) {
         console.error("❌ fallback TTS failed:", e.message);
       }
