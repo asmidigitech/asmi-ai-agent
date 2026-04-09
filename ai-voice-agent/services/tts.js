@@ -2,6 +2,19 @@
 
 const axios = require("axios");
 
+
+function normalizeForSpeech(text = "") {
+  return String(text)
+    .replace(/₹\s*499/g, "chaar sau ninyanve rupaye")
+    .replace(/₹/g, "rupaye ")
+    .replace(/\bDigiTL Elev8\b/gi, "Digital Elevate")
+    .replace(/\bDIGITL ELEV8\b/gi, "Digital Elevate")
+    .replace(/\bElev8\b/gi, "Elevate")
+    .replace(/&/g, " and ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function requireEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -131,7 +144,7 @@ async function sendMark(ws, label = "tts_complete") {
 }
 
 async function speakAndMark(ws, text) {
-  const cleanText = String(text || "").trim();
+const cleanText = normalizeForSpeech(text || "");
   if (!cleanText) return;
   if (!ws || ws.readyState !== 1) return;
 
