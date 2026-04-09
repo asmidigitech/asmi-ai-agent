@@ -1,4 +1,4 @@
-// prompts.js
+// services/prompts.js
 
 function fill(text, vars = {}) {
   return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || "");
@@ -7,13 +7,13 @@ function fill(text, vars = {}) {
 const PROMPTS = {
   opening(ctx) {
     return fill(
-      "Hi {{name}}, main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right?",
+      "Hi {{name}}, main Riya bol rahi hoon from Digital Elevate, Asmi Digitech se. Aapne recently business assessment fill kiya tha, right?",
       { name: ctx.name || "sir" }
     );
   },
 
   permission() {
-    return "Main bas 30 seconds loongi. Ek-do short questions poochke aapko ₹499 strategy call ka link WhatsApp par share kar dungi. Theek hai?";
+    return "Main bas 30 seconds loongi. Ek-do short questions poochke aapko chaar sau ninyanve rupaye wali strategy call ka link WhatsApp par share kar dungi. Theek hai?";
   },
 
   q1BusinessType() {
@@ -53,7 +53,7 @@ const PROMPTS = {
   },
 
   whoAreYou() {
-    return "Main Riya bol rahi hoon from DigiTL Elev8, Asmi Digitech se. Aapne business assessment fill kiya tha.";
+    return "Main Riya bol rahi hoon from Digital Elevate, Asmi Digitech se. Aapne business assessment fill kiya tha.";
   },
 
   reminder() {
@@ -72,11 +72,11 @@ const PROMPTS = {
         "Samajh gaya. Isi liye short strategy call useful rahegi.",
     };
 
-    return `${map[problemType] || map.unclear} Isi liye ₹499 strategy call useful rahegi, kyunki Anand sir aapke current gap aur practical next step clear karenge.`;
+    return `${map[problemType] || map.unclear} Isi liye chaar sau ninyanve rupaye ki strategy call useful rahegi, kyunki Anand sir aapke current gap aur practical next step clear karenge.`;
   },
 
   sendLink() {
-    return "Main abhi aapko ₹499 strategy call ka link WhatsApp par share kar rahi hoon.";
+    return "Main abhi aapko chaar sau ninyanve rupaye wali strategy call ka link WhatsApp par share kar rahi hoon.";
   },
 
   commitmentCheck() {
