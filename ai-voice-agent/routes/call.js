@@ -24,16 +24,11 @@ const lead = {
   niche: body.niche || "",
 };
 
-// Register BEFORE calling Exotel
+
+// Register BEFORE calling Exotel (ONLY ONCE)
 const stored = registerPendingSession(lead.session_id, lead);
 
 console.log("📞 Triggering live Exotel call:", stored);
-    
-
-    console.log("📞 Triggering live Exotel call:", lead);
-
-    // IMPORTANT: register session before connecting call
-    const stored = registerPendingSession(lead.session_id, lead);
 
     const accountSid = process.env.EXOTEL_ACCOUNT_SID;
     const apiKey = process.env.EXOTEL_API_KEY;
@@ -61,14 +56,14 @@ console.log("📞 Triggering live Exotel call:", stored);
       StatusCallback: statusCallback,
     });
 
-    const payload = new URLSearchParams({
-      From: stored.phone
-      To: stored.phone,
-      CallerId: callerId,
-      Url: flowUrl,
-      StatusCallback: statusCallback,
-      StatusCallbackContentType: "application/json",
-    });
+const payload = new URLSearchParams({
+  From: stored.phone,
+  To: stored.phone,
+  CallerId: callerId,
+  Url: flowUrl,
+  StatusCallback: statusCallback,
+  StatusCallbackContentType: "application/json",
+});
 
     const exotelResp = await axios.post(connectUrl, payload.toString(), {
       headers: {
