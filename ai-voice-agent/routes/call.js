@@ -4,6 +4,8 @@ const express = require("express");
 const axios = require("axios");
 const router = express.Router();
 
+const { registerPendingSession, normalizePhone } = require("../services/sessionStore");
+
 const {
   registerPendingSession,
   normalizePhone,
@@ -13,18 +15,24 @@ router.post("/trigger-live-call", async (req, res) => {
   try {
     const body = req.body || {};
 
-    const lead = {
-      lead_id: body.lead_id || body.id || null,
-      session_id:
-        body.session_id ||
-        `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      phone: normalizePhone(body.phone || ""),
-      name: body.name || "sir",
-      score: Number(body.score || 0),
-      stage: body.stage || "",
-      heat: body.heat || "",
-      niche: body.niche || "",
-    };
+const lead = {
+  lead_id: body.lead_id || body.id || null,
+  session_id:
+    body.session_id ||
+    `live_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  phone: normalizePhone(body.phone || ""),
+  name: body.name || "sir",
+  score: Number(body.score || 0),
+  stage: body.stage || "",
+  heat: body.heat || "",
+  niche: body.niche || "",
+};
+
+// Register BEFORE calling Exotel
+const stored = registerPendingSession(lead.session_id, lead);
+
+console.log("📞 Triggering live Exotel call:", stored);
+    
 
     console.log("📞 Triggering live Exotel call:", lead);
 
@@ -41,11 +49,14 @@ router.post("/trigger-live-call", async (req, res) => {
 
     const connectUrl = `https://${apiKey}:${apiToken}@${subdomain}/v1/Accounts/${accountSid}/Calls/connect`;
 
-    const statusCallback =
-      `${appBaseUrl}/api/exotel/status` +
-      `?lead_id=${encodeURIComponent(stored.lead_id || "")}` +
-      `&session_id=${encodeURIComponent(stored.session_id)}`;
+  const statusCallback =
+  `${appBaseUrl}/api/exotel/status` +
+  `?lead_id=${encodeURIComponent(stored.lead_id || "")}` +
+  `&session_id=${encodeURIComponent(stored.session_id)}`;
 
+
+
+    
     console.log("📤 Exotel connect request:", {
       connectUrl,
       From: stored.phone,
@@ -55,7 +66,7 @@ router.post("/trigger-live-call", async (req, res) => {
     });
 
     const payload = new URLSearchParams({
-      From: stored.phone,
+      From: stored.phone
       To: stored.phone,
       CallerId: callerId,
       Url: flowUrl,
