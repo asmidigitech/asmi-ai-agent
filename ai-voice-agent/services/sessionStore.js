@@ -25,14 +25,12 @@ function registerPendingSession(sessionId, lead = {}) {
     heat: lead.heat || "",
     niche: lead.niche || "",
     createdAt: Date.now(),
-    consumed: false,
   };
 
   sessions.set(safeSessionId, payload);
   latestSessionId = safeSessionId;
 
   cleanupOldSessions();
-
   return payload;
 }
 
@@ -46,7 +44,8 @@ function consumeSession(sessionId) {
   const entry = sessions.get(sessionId);
   if (!entry) return null;
 
-  entry.consumed = true;
+  sessions.delete(sessionId);
+  if (latestSessionId === sessionId) latestSessionId = null;
   return entry;
 }
 
@@ -64,12 +63,7 @@ function findByPhone(phone = "") {
 
 function consumeLatestPendingSession() {
   if (!latestSessionId) return null;
-
-  const entry = sessions.get(latestSessionId);
-  if (!entry) return null;
-
-  entry.consumed = true;
-  return entry;
+  return consumeSession(latestSessionId);
 }
 
 function cleanupOldSessions(maxAgeMs = 30 * 60 * 1000) {
