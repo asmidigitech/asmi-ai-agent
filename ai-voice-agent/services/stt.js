@@ -2,9 +2,7 @@
 
 async function transcribeAudioBuffer(audioBuffer) {
   try {
-    if (!audioBuffer || !audioBuffer.length) {
-      return "";
-    }
+    if (!audioBuffer || !audioBuffer.length) return "";
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -28,8 +26,8 @@ async function transcribeAudioBuffer(audioBuffer) {
     });
 
     if (!response.ok) {
-      const errText = await response.text();
-      console.error("❌ STT API failed:", response.status, errText);
+      const txt = await response.text();
+      console.error("❌ STT API failed:", response.status, txt);
       return "";
     }
 
