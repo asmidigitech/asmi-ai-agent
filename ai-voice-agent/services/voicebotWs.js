@@ -6,12 +6,14 @@ const { speakAndMark } = require("./tts");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
 const { PROMPTS } = require("./prompts");
 const { STATES, APP } = require("./config");
+
 const {
   consumeSession,
   findByPhone,
   consumeLatestPendingSession,
   normalizePhone,
 } = require("./sessionStore");
+  
 
 function debug(...args) {
   if (APP.DEBUG) console.log(...args);
@@ -197,13 +199,40 @@ function scheduleKeepAlive(session) {
   }, Number(process.env.WS_KEEPALIVE_MS || 5000));
 }
 
+
+
 function recoverLead(msg, fallbackLead = {}) {
   const startPayload = msg.start || {};
   const custom = startPayload.customParameters || {};
-  const sessionId = custom.session_id || startPayload.session_id || null;
+
+  const sessionId =
+    custom.session_id ||
+    startPayload.session_id ||
+    null;
+
   const phone = normalizePhone(
-    startPayload.from || startPayload.From || custom.phone || ""
+    startPayload.from ||
+    startPayload.From ||
+    custom.phone ||
+    ""
   );
+
+  const recovered =
+    consumeSession(sessionId) ||
+    findByPhone(phone) ||
+    consumeLatestPendingSession();
+
+  if (recovered) {
+    return recovered;
+  }
+
+  return fallbackLead;
+}
+
+
+
+
+  
 
   const recovered =
     consumeSession(sessionId) ||
@@ -232,8 +261,12 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           break;
 
         case "start": {
-          debug("📡 Event: start");
 
+    const recoveredLead = recoverLead(msg, lead);
+    session = new VoiceSession(recoveredLead);
+          
+          debug("📡 Event: start");
+debug("✅ Active session lead:", session.engine.ctx);
           session.streamSid =
             msg.start?.streamSid ||
             msg.streamSid ||
