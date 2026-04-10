@@ -6,14 +6,12 @@ const { speakAndMark } = require("./tts");
 const { sendWhatsAppPaymentLink } = require("./linkSender");
 const { PROMPTS } = require("./prompts");
 const { STATES, APP } = require("./config");
-
 const {
   consumeSession,
   findByPhone,
   consumeLatestPendingSession,
   normalizePhone,
 } = require("./sessionStore");
-  
 
 function debug(...args) {
   if (APP.DEBUG) console.log(...args);
@@ -25,13 +23,6 @@ function safeJsonParse(data) {
   } catch {
     return null;
   }
-}
-
-function sendWsSafe(ws, payload) {
-  return new Promise((resolve) => {
-    if (!ws || ws.readyState !== 1) return resolve();
-    ws.send(JSON.stringify(payload), () => resolve());
-  });
 }
 
 async function sendLinkOnce(session) {
@@ -51,51 +42,41 @@ async function sendLinkOnce(session) {
   return result;
 }
 
-async function playCurrentState(ws, session) {
-  const engine = session.engine;
-  const text = engine.getCurrentQuestion();
+async function playText(ws, session, text) {
+  if (!text || !String(text).trim()) return;
 
-  engine.lastBotMessage = text;
-  engine.log({ type: "bot", text });
+  session.engine.lastBotMessage = text;
+  session.engine.log({ type: "bot", text });
 
   session.isBotSpeaking = true;
   session.awaitingUserSpeech = false;
   session.hasUserMediaSincePrompt = false;
 
-  debug(`🤖 State ${engine.state}: ${text}`);
-
+  debug(`🤖 State ${session.engine.state}: ${text}`);
   await speakAndMark(ws, text);
+}
 
-  if (engine.state === STATES.SEND_LINK) {
+async function playCurrentState(ws, session) {
+  const text = session.engine.getCurrentQuestion();
+  await playText(ws, session, text);
+
+  if (session.engine.state === STATES.SEND_LINK) {
     await sendLinkOnce(session);
   }
 
-  const prev = engine.state;
-  engine.nextAfterBotUtterance();
-  debug(`📍 Next state after bot utterance: ${engine.state} (from ${prev})`);
-}
-
-async function playText(ws, session, text) {
-  session.isBotSpeaking = true;
-  session.awaitingUserSpeech = false;
-  session.hasUserMediaSincePrompt = false;
-
-  session.engine.log({ type: "bot", text });
-  debug(`🤖 Immediate: ${text}`);
-
-  await speakAndMark(ws, text);
+  const prev = session.engine.state;
+  session.engine.nextAfterBotUtterance();
+  debug(`📍 Next state after bot utterance: ${session.engine.state} (from ${prev})`);
 }
 
 async function processTranscript(ws, session, transcript) {
-  const engine = session.engine;
   const { detectIntent } = require("./intent");
 
   debug("📝 Transcript:", transcript);
-
   const detected = detectIntent(transcript);
-  debug("🧠 Intent:", detected.intent, "| Current State:", engine.state);
+  debug("🧠 Intent:", detected.intent, "| Current State:", session.engine.state);
 
-  const result = engine.processUserIntent(detected);
+  const result = session.engine.processUserIntent(detected);
 
   if (result.immediateReply) {
     await playText(ws, session, result.immediateReply);
@@ -129,7 +110,11 @@ async function processQueue(ws, session) {
     session.processing = false;
 
     if (session.queue.size() > 0) {
-      setImmediate(() => processQueue(ws, session));
+      setImmediate(() => {
+        processQueue(ws, session).catch((err) => {
+          console.error("❌ deferred queue processing failed:", err);
+        });
+      });
     }
   }
 }
@@ -150,7 +135,9 @@ function scheduleUtteranceFinalize(ws, session) {
 
       session.awaitingUserSpeech = false;
       session.queue.push({ audioBuffer, ts: Date.now() });
-      processQueue(ws, session);
+      processQueue(ws, session).catch((err) => {
+        console.error("❌ processQueue failed:", err);
+      });
     } catch (err) {
       console.error("❌ utterance finalize failed:", err);
     }
@@ -199,40 +186,14 @@ function scheduleKeepAlive(session) {
   }, Number(process.env.WS_KEEPALIVE_MS || 5000));
 }
 
-
-
 function recoverLead(msg, fallbackLead = {}) {
   const startPayload = msg.start || {};
   const custom = startPayload.customParameters || {};
-
-  const sessionId =
-    custom.session_id ||
-    startPayload.session_id ||
-    null;
+  const sessionId = custom.session_id || startPayload.session_id || null;
 
   const phone = normalizePhone(
-    startPayload.from ||
-    startPayload.From ||
-    custom.phone ||
-    ""
+    startPayload.from || startPayload.From || custom.phone || ""
   );
-
-  const recovered =
-    consumeSession(sessionId) ||
-    findByPhone(phone) ||
-    consumeLatestPendingSession();
-
-  if (recovered) {
-    return recovered;
-  }
-
-  return fallbackLead;
-}
-
-
-
-
-  
 
   const recovered =
     consumeSession(sessionId) ||
@@ -261,22 +222,11 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           break;
 
         case "start": {
-
-    const recoveredLead = recoverLead(msg, lead);
-    session = new VoiceSession(recoveredLead);
-          
           debug("📡 Event: start");
-debug("✅ Active session lead:", session.engine.ctx);
-          session.streamSid =
-            msg.start?.streamSid ||
-            msg.streamSid ||
-            msg.start?.callSid ||
-            null;
-
-          debug("▶️ Call started:", session.streamSid || "");
 
           const recoveredLead = recoverLead(msg, lead);
           session = new VoiceSession(recoveredLead);
+
           session.streamSid =
             msg.start?.streamSid ||
             msg.streamSid ||
@@ -284,6 +234,9 @@ debug("✅ Active session lead:", session.engine.ctx);
             null;
 
           scheduleKeepAlive(session);
+
+          debug("▶️ Call started:", session.streamSid || "");
+          debug("✅ Active session lead:", session.engine.ctx);
 
           if (!session.started) {
             session.started = true;
@@ -293,8 +246,7 @@ debug("✅ Active session lead:", session.engine.ctx);
         }
 
         case "media": {
-          // Fast path only: read immediately and return
-          if (!session.isBotSpeaking && session.awaitingUserSpeech && msg.media?.payload) {
+          if (msg.media?.payload && !session.isBotSpeaking && session.awaitingUserSpeech) {
             const buf = Buffer.from(msg.media.payload, "base64");
             session.pushAudioChunk(buf);
             scheduleUtteranceFinalize(ws, session);
@@ -312,7 +264,6 @@ debug("✅ Active session lead:", session.engine.ctx);
         case "stop":
           debug("📡 Event: stop");
           debug("⏹ Call stopped");
-
           session.clearAllTimers();
 
           if (APP.AUTO_SEND_LINK_ON_EXIT && !session.engine.ctx.linkSent) {
