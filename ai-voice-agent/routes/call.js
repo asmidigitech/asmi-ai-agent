@@ -6,10 +6,6 @@ const router = express.Router();
 
 const { registerPendingSession, normalizePhone } = require("../services/sessionStore");
 
-const {
-  registerPendingSession,
-  normalizePhone,
-} = require("../services/sessionStore");
 
 router.post("/trigger-live-call", async (req, res) => {
   try {
