@@ -188,27 +188,48 @@ function scheduleKeepAlive(session) {
 
 function recoverLead(msg, fallbackLead = {}) {
   const startPayload = msg.start || {};
-  
-  
+
   const custom =
-  startPayload.custom_parameters ||
-  startPayload.customParameters ||
-  {};
-  
-  const sessionId = custom.session_id || startPayload.session_id || null;
+    startPayload.custom_parameters ||
+    startPayload.customParameters ||
+    {};
+
+  const sessionId =
+    String(
+      custom.session_id ||
+      startPayload.session_id ||
+      ""
+    ).trim();
 
   const phone = normalizePhone(
-    startPayload.from || startPayload.From || custom.phone || ""
+    startPayload.from ||
+    startPayload.From ||
+    custom.phone ||
+    ""
   );
 
-  const recovered =
-    consumeSession(sessionId) ||
-    findByPhone(phone) ||
-    consumeLatestPendingSession();
+  console.log("🧪 recoverLead sessionId:", sessionId);
+  console.log("🧪 recoverLead phone:", phone);
+
+  let recovered = null;
+
+  if (sessionId) {
+    recovered = consumeSession(sessionId);
+    console.log("🧪 consumeSession result:", recovered || null);
+  }
+
+  if (!recovered && phone) {
+    recovered = findByPhone(phone);
+    console.log("🧪 findByPhone result:", recovered || null);
+  }
+
+  if (!recovered) {
+    recovered = consumeLatestPendingSession();
+    console.log("🧪 consumeLatestPendingSession result:", recovered || null);
+  }
 
   return recovered || fallbackLead;
 }
-
 async function handleVoicebotWs(ws, req, lead = {}) {
   let session = new VoiceSession(lead);
 
