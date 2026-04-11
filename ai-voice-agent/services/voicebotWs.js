@@ -223,7 +223,7 @@ async function handleVoicebotWs(ws, req, lead = {}) {
 
         case "start": {
           debug("📡 Event: start");
-
+          debug("🧪 start payload:", JSON.stringify(msg.start || {}, null, 2));
           const recoveredLead = recoverLead(msg, lead);
           session = new VoiceSession(recoveredLead);
 
