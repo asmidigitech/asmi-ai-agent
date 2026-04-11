@@ -41,12 +41,7 @@ function getSession(sessionId) {
 
 function consumeSession(sessionId) {
   if (!sessionId) return null;
-  const entry = sessions.get(sessionId);
-  if (!entry) return null;
-
-  sessions.delete(sessionId);
-  if (latestSessionId === sessionId) latestSessionId = null;
-  return entry;
+  return sessions.get(sessionId) || null;
 }
 
 function findByPhone(phone = "") {
