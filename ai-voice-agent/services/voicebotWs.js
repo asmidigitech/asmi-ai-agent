@@ -101,11 +101,15 @@ async function processQueue(ws, session) {
   } catch (err) {
     console.error("❌ queue processing failed:", err);
 
-    try {
-      await playText(ws, session, PROMPTS.silenceFallback());
-    } catch (e) {
-      console.error("❌ fallback speech failed:", e.message);
-    }
+  // try {
+//      await playText(ws, session, PROMPTS.silenceFallback());
+//    } catch (e) {
+//      console.error("❌ fallback speech failed:", e.message);
+//    }
+
+console.error("❌ fallback suppressed to avoid overlap");
+
+    
   } finally {
     session.processing = false;
 
