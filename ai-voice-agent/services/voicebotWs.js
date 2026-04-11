@@ -244,13 +244,16 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           debug("▶️ Call started:", session.streamSid || "");
           debug("✅ Active session lead:", session.engine.ctx);
 
+
+          
           if (!session.started) {
             session.started = true;
             await playCurrentState(ws, session);
           }
           break;
         }
-
+debug("Recovered sessionId:", custom.session_id);
+          debug("Recovered by phone:", phone);
         case "media": {
           if (msg.media?.payload && !session.isBotSpeaking && session.awaitingUserSpeech) {
             const buf = Buffer.from(msg.media.payload, "base64");
