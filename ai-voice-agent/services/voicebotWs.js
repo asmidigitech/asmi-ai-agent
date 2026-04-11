@@ -326,25 +326,14 @@ async function handleVoicebotWs(ws, req, lead = {}) {
           debug("Recovered by phone:", phone);
 
 
-     case "media":
-          if (msg.media?.payload) {
-            audioCollector.push(msg.media.payload);
-        
-            // 🔥 AUTO PROCESS when enough audio collected
-            if (audioCollector.size() > 8000) {
-              const audioBuffer = audioCollector.consume();
-        
-              console.log("🧠 Processing speech (media):", audioBuffer.length);
-        
-              const transcript = await transcribeAudioBuffer(audioBuffer);
-        
-              console.log("🗣 Transcript:", transcript);
-        
-              await handleIntentFlow(ws, engine, transcript || "");
-            }
-          }
+case "media": {
+  if (msg.media?.payload && !session.isBotSpeaking && session.awaitingUserSpeech) {
+    const buf = Buffer.from(msg.media.payload, "base64");
+    session.pushAudioChunk(buf);
+    scheduleUtteranceFinalize(ws, session);
+  }
   break;
-
+}
 
 
           
