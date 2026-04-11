@@ -186,6 +186,18 @@ function scheduleKeepAlive(session) {
   }, Number(process.env.WS_KEEPALIVE_MS || 5000));
 }
 
+function decodeHtmlEntities(str = "") {
+  return String(str)
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#38;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&#60;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#62;/g, '>');
+}
+
 function recoverLead(msg, fallbackLead = {}) {
   const startPayload = msg.start || {};
 
@@ -194,31 +206,66 @@ function recoverLead(msg, fallbackLead = {}) {
     startPayload.customParameters ||
     {};
 
-  const rawLeadData = Object.keys(custom).find((k) =>
-    k.startsWith("{")
-  );
-
   let parsedLead = null;
 
-  if (rawLeadData) {
+  // Preferred path: lead_data as a normal key
+  if (custom.lead_data) {
     try {
-      parsedLead = JSON.parse(rawLeadData);
-      console.log("✅ Parsed lead from custom_parameters:", parsedLead);
+      const decoded = decodeHtmlEntities(custom.lead_data);
+      parsedLead = JSON.parse(decoded);
+      console.log("✅ Parsed lead from custom.lead_data:", parsedLead);
     } catch (e) {
-      console.log("❌ Failed parsing lead_data");
+      console.log("❌ Failed parsing custom.lead_data:", e.message);
     }
   }
 
-  if (parsedLead) return parsedLead;
+  // Backward-compat path: whole JSON object accidentally arrives as a key
+  if (!parsedLead) {
+    const rawLeadKey = Object.keys(custom).find((k) => k.startsWith("{"));
+    if (rawLeadKey) {
+      try {
+        const decoded = decodeHtmlEntities(rawLeadKey);
+        parsedLead = JSON.parse(decoded);
+        console.log("✅ Parsed lead from custom key:", parsedLead);
+      } catch (e) {
+        console.log("❌ Failed parsing custom key:", e.message);
+      }
+    }
+  }
 
-  const sessionId =
-    custom.session_id || startPayload.session_id || null;
+  if (parsedLead) {
+    return {
+      lead_id: parsedLead.lead_id || null,
+      session_id:
+        parsedLead.session_id ||
+        custom.session_id ||
+        startPayload.session_id ||
+        null,
+      name: parsedLead.name || "sir",
+      phone: normalizePhone(parsedLead.phone || startPayload.from || ""),
+      score: Number(parsedLead.score || 0),
+      stage: parsedLead.stage || "",
+      heat: parsedLead.heat || "",
+      niche: parsedLead.niche || "",
+    };
+  }
+
+  const sessionId = String(
+    custom.session_id ||
+    startPayload.session_id ||
+    ""
+  ).trim();
 
   const phone = normalizePhone(
-    startPayload.from || startPayload.From || ""
+    startPayload.from ||
+    startPayload.From ||
+    custom.phone ||
+    ""
   );
 
   console.log("⚠️ Fallback recovery used");
+  console.log("🧪 recoverLead sessionId:", sessionId);
+  console.log("🧪 recoverLead phone:", phone);
 
   return (
     consumeSession(sessionId) ||
