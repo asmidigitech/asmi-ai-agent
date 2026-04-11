@@ -188,7 +188,13 @@ function scheduleKeepAlive(session) {
 
 function recoverLead(msg, fallbackLead = {}) {
   const startPayload = msg.start || {};
-  const custom = startPayload.customParameters || {};
+  
+  
+  const custom =
+  startPayload.custom_parameters ||
+  startPayload.customParameters ||
+  {};
+  
   const sessionId = custom.session_id || startPayload.session_id || null;
 
   const phone = normalizePhone(
