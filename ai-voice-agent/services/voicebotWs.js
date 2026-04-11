@@ -194,42 +194,44 @@ function recoverLead(msg, fallbackLead = {}) {
     startPayload.customParameters ||
     {};
 
-  const sessionId =
-    String(
-      custom.session_id ||
-      startPayload.session_id ||
-      ""
-    ).trim();
-
-  const phone = normalizePhone(
-    startPayload.from ||
-    startPayload.From ||
-    custom.phone ||
-    ""
+  const rawLeadData = Object.keys(custom).find((k) =>
+    k.startsWith("{")
   );
 
-  console.log("🧪 recoverLead sessionId:", sessionId);
-  console.log("🧪 recoverLead phone:", phone);
+  let parsedLead = null;
 
-  let recovered = null;
-
-  if (sessionId) {
-    recovered = consumeSession(sessionId);
-    console.log("🧪 consumeSession result:", recovered || null);
+  if (rawLeadData) {
+    try {
+      parsedLead = JSON.parse(rawLeadData);
+      console.log("✅ Parsed lead from custom_parameters:", parsedLead);
+    } catch (e) {
+      console.log("❌ Failed parsing lead_data");
+    }
   }
 
-  if (!recovered && phone) {
-    recovered = findByPhone(phone);
-    console.log("🧪 findByPhone result:", recovered || null);
-  }
+  if (parsedLead) return parsedLead;
 
-  if (!recovered) {
-    recovered = consumeLatestPendingSession();
-    console.log("🧪 consumeLatestPendingSession result:", recovered || null);
-  }
+  const sessionId =
+    custom.session_id || startPayload.session_id || null;
 
-  return recovered || fallbackLead;
+  const phone = normalizePhone(
+    startPayload.from || startPayload.From || ""
+  );
+
+  console.log("⚠️ Fallback recovery used");
+
+  return (
+    consumeSession(sessionId) ||
+    findByPhone(phone) ||
+    consumeLatestPendingSession() ||
+    fallbackLead
+  );
 }
+
+
+
+
+
 async function handleVoicebotWs(ws, req, lead = {}) {
   let session = new VoiceSession(lead);
 
