@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_res_config_settings_asmi_whatsapp" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.asmi.whatsapp</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <app string="Asmi WhatsApp Engine" name="asmi_whatsapp_engine">
+                    <block title="Gallabox Settings">
+                        <setting string="Gallabox API Key">
+                            <field name="asmi_gallabox_api_key" password="True"/>
+                        </setting>
+                        <setting string="Gallabox API Secret">
+                            <field name="asmi_gallabox_api_secret" password="True"/>
+                        </setting>
+                        <setting string="Gallabox Channel ID">
+                            <field name="asmi_gallabox_channel_id"/>
+                        </setting>
+                        <setting string="Gallabox Base URL">
+                            <field name="asmi_gallabox_base_url"/>
+                        </setting>
+                        <setting string="WA1 to WA499 Delay">
+                            <field name="asmi_wa_delay_seconds"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>
