@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo noupdate="1">
+    <record id="asmi_whatsapp_template_wa1" model="asmi.whatsapp.template">
+        <field name="name">WA1 Initial Score Message</field>
+        <field name="code">wa1</field>
+        <field name="gallabox_template_name">wa1</field>
+        <field name="route_scope">all</field>
+        <field name="sequence">10</field>
+    </record>
+
+    <record id="asmi_whatsapp_template_wa499" model="asmi.whatsapp.template">
+        <field name="name">WA499 Paid Call Push</field>
+        <field name="code">wa499</field>
+        <field name="gallabox_template_name">wa499</field>
+        <field name="route_scope">hot_warm</field>
+        <field name="sequence">20</field>
+    </record>
+</odoo>
