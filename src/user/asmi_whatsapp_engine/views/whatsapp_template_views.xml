@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_asmi_whatsapp_template_tree" model="ir.ui.view">
+        <field name="name">asmi.whatsapp.template.tree</field>
+        <field name="model">asmi.whatsapp.template</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="sequence"/>
+                <field name="name"/>
+                <field name="code"/>
+                <field name="gallabox_template_name"/>
+                <field name="route_scope"/>
+                <field name="active"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_asmi_whatsapp_template_form" model="ir.ui.view">
+        <field name="name">asmi.whatsapp.template.form</field>
+        <field name="model">asmi.whatsapp.template</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="code"/>
+                        <field name="gallabox_template_name"/>
+                        <field name="route_scope"/>
+                        <field name="sequence"/>
+                        <field name="active"/>
+                    </group>
+                    <group>
+                        <field name="description"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_asmi_whatsapp_templates" model="ir.actions.act_window">
+        <field name="name">WhatsApp Templates</field>
+        <field name="res_model">asmi.whatsapp.template</field>
+        <field name="view_mode">tree,form</field>
+    </record>
+
+    <menuitem id="menu_asmi_whatsapp_root" name="Asmi WhatsApp" sequence="90"/>
+    <menuitem id="menu_asmi_whatsapp_templates" name="Templates"
+              parent="menu_asmi_whatsapp_root"
+              action="action_asmi_whatsapp_templates" sequence="10"/>
+</odoo>
