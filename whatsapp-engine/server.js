@@ -11,11 +11,11 @@ const GALLABOX_API_KEY = process.env.GALLABOX_API_KEY;
 const GALLABOX_API_SECRET = process.env.GALLABOX_API_SECRET;
 const CHANNEL_ID = process.env.GALLABOX_CHANNEL_ID;
 
-// 🔥 Normalize phone
+// Normalize phone
 function normalizePhone(phone) {
   if (!phone) return null;
 
-  let digits = phone.replace(/\D/g, "");
+  const digits = String(phone).replace(/\D/g, "");
 
   if (digits.length === 12 && digits.startsWith("91")) {
     return digits;
@@ -36,7 +36,7 @@ function normalizePhone(phone) {
   return null;
 }
 
-// 🔥 Send WhatsApp
+// Send WhatsApp
 async function sendWhatsApp(templateName, phone, bodyValues) {
   const payload = {
     channelId: CHANNEL_ID,
@@ -49,11 +49,13 @@ async function sendWhatsApp(templateName, phone, bodyValues) {
     whatsapp: {
       type: "template",
       template: {
-        templateName: templateName,
-        bodyValues: bodyValues,
+        templateName,
+        bodyValues,
       },
     },
   };
+
+  console.log(`Sending ${templateName} to ${phone}`, payload);
 
   const response = await axios.post(
     "https://server.gallabox.com/devapi/messages/whatsapp",
@@ -64,22 +66,21 @@ async function sendWhatsApp(templateName, phone, bodyValues) {
         apiSecret: GALLABOX_API_SECRET,
         "Content-Type": "application/json",
       },
+      timeout: 30000,
     }
   );
 
+  console.log(`Gallabox response for ${templateName}:`, response.data);
   return response.data;
 }
 
-// 🔥 MAIN WEBHOOK
+// MAIN WEBHOOK
 app.post("/lead", async (req, res) => {
   try {
     const lead = req.body;
-
     console.log("Incoming Lead:", lead);
 
-    const phone = normalizePhone(
-      lead.phone_sanitized || lead.phone
-    );
+    const phone = normalizePhone(lead.phone_sanitized || lead.phone);
 
     if (!phone) {
       return res.status(400).json({ error: "Invalid phone" });
@@ -87,13 +88,14 @@ app.post("/lead", async (req, res) => {
 
     const name = lead.name || "Founder";
     const score = lead.x_lg_score || "0";
-    const heat = (lead.x_lg_heat || "").toLowerCase();
+    const heat = String(lead.x_lg_heat || "").toLowerCase();
+    const reportId = `BSA-2026-${lead.id}`;
 
     // WA1
     await sendWhatsApp("wa1", phone, {
-      name: name,
+      name,
       score: String(score),
-      report_id: `BSA-${lead.id}`,
+      report_id: reportId,
     });
 
     // WAIT 20 sec
@@ -102,16 +104,18 @@ app.post("/lead", async (req, res) => {
     // WA499 only for HOT/WARM
     if (heat === "hot" || heat === "warm") {
       await sendWhatsApp("wa499", phone, {
-        name: name,
+        name,
         payment_link: "https://rzp.io/rzp/s5izYcy",
+        report_id: reportId,
       });
     }
 
-    res.json({ success: true });
-
+    return res.json({ success: true });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Webhook error:", err.response?.data || err.message || err);
+    return res.status(500).json({
+      error: err.response?.data || err.message || "Unknown error",
+    });
   }
 });
 
