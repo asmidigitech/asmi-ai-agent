@@ -86,9 +86,9 @@ app.post("/lead", async (req, res) => {
       return res.status(400).json({ error: "Invalid phone" });
     }
 
-    const name = lead.name || "Founder";
+  const name = lead.name || lead.contact_name || "Founder";
     const score = lead.x_lg_score || "0";
-    const heat = String(lead.x_lg_heat || "").toLowerCase();
+ const heat = (lead.x_lg_heat || lead.x_lg_stage || "").toLowerCase();
     const reportId = `BSA-2026-${lead.id}`;
 
     // WA1
