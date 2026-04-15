@@ -92,7 +92,23 @@ app.post("/lead", async (req, res) => {
 
 const name = lead.name || lead.contact_name || "Founder";
 const score = lead.x_lg_score || "0";
-const heat = String(lead.x_lg_heat || lead.x_make_route || "").toLowerCase();
+
+    
+let heat = "";
+
+if (lead.x_lg_heat === true) {
+  heat = "hot";
+} else if (lead.x_lg_stage) {
+  heat = lead.x_lg_stage.toLowerCase();
+}
+
+// Map stage → heat
+if (heat === "struggling") heat = "cold";
+if (heat === "growing") heat = "warm";
+if (heat === "scaling") heat = "hot";
+
+
+    
 const reportId = `BSA-2026-${lead.id}`;
 
 // WA1
