@@ -1,0 +1,41 @@
+<odoo>
+  <template id="business_score_report">
+    <t t-call="web.external_layout">
+      <div class="page">
+        
+        <h2>Business Growth Scorecard Report</h2>
+
+        <p><strong>Name:</strong> <t t-esc="doc.partner_name"/></p>
+        <p><strong>Score:</strong> <t t-esc="doc.x_score"/> / 100</p>
+        <p><strong>Stage:</strong> <t t-esc="doc.x_stage"/></p>
+
+        <h3>Understanding Your Stage</h3>
+        <p>
+          Businesses move from Struggling → Growing → Scaling → System-Driven.
+        </p>
+
+        <h3>Your Current Position</h3>
+        <p>
+          You are currently in <t t-esc="doc.x_stage"/> stage.
+        </p>
+
+        <h3>Key Observations</h3>
+        <ul>
+          <li>Follow-up inconsistency</li>
+          <li>Conversion gaps</li>
+          <li>High founder dependency</li>
+        </ul>
+
+        <h3>Next Step</h3>
+        <p>
+          Review your next step here:
+        </p>
+
+        <p>
+          <a t-att-href="doc.x_payment_link">Access Next Step</a>
+        </p>
+
+      </div>
+    </t>
+  </template>
+</odoo>
