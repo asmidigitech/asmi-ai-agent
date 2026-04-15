@@ -86,29 +86,36 @@ app.post("/lead", async (req, res) => {
       return res.status(400).json({ error: "Invalid phone" });
     }
 
-  const name = lead.name || lead.contact_name || "Founder";
-    const score = lead.x_lg_score || "0";
- const heat = (lead.x_lg_heat || lead.x_lg_stage || "").toLowerCase();
-    const reportId = `BSA-2026-${lead.id}`;
 
-    // WA1
-    await sendWhatsApp("wa1", phone, {
-      name,
-      score: String(score),
-      report_id: reportId,
-    });
 
-    // WAIT 20 sec
-    await new Promise((r) => setTimeout(r, 20000));
 
-    // WA499 only for HOT/WARM
-    if (heat === "hot" || heat === "warm") {
-      await sendWhatsApp("wa499", phone, {
-        name,
-        payment_link: "https://rzp.io/rzp/s5izYcy",
-        report_id: reportId,
-      });
-    }
+
+const name = lead.name || lead.contact_name || "Founder";
+const score = lead.x_lg_score || "0";
+const heat = String(lead.x_lg_heat || lead.x_make_route || "").toLowerCase();
+const reportId = `BSA-2026-${lead.id}`;
+
+// WA1
+await sendWhatsApp("wa1", phone, {
+  name,
+  score: String(score),
+  report_id: reportId,
+});
+
+// WAIT 20 sec
+await new Promise((r) => setTimeout(r, 20000));
+
+// WA499 only for HOT/WARM
+if (heat === "hot" || heat === "warm") {
+  await sendWhatsApp("wa499", phone, {
+    name,
+    payment_link: "https://rzp.io/rzp/s5izYcy",
+    report_id: reportId,
+  });
+}
+      
+ 
+
 
     return res.json({ success: true });
   } catch (err) {
