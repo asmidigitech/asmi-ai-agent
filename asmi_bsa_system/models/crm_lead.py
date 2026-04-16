@@ -10,12 +10,17 @@ from odoo import fields, models
 
 _logger = logging.getLogger(__name__)
 
+x_bsa_test_field = fields.Char(string="BSA Test Field")
 
 class CrmLead(models.Model):
     _inherit = 'crm.lead'
 
     # New minimal fields only for the new BSA tracking/PDF flow
-    x_tracking_token = fields.Char(string="Tracking Token", copy=False, index=True)
+//    x_tracking_token = fields.Char(string="Tracking Token", copy=False, index=True)
+ x_tracking_token = fields.Char(string="Tracking Token")
+    x_bsa_test_field = fields.Char(string="BSA Test Field")
+
+    
     x_pdf_attachment_id = fields.Many2one('ir.attachment', string="Score PDF Attachment")
     x_followup_state = fields.Char(string="Follow-up State")
     x_last_event = fields.Char(string="Last Event")
@@ -99,7 +104,8 @@ class CrmLead(models.Model):
         Does NOT touch existing wa1 / wa499 logic unless you explicitly call this method.
         """
         self.ensure_one()
-
+        self.x_bsa_test_field = "METHOD WORKING"
+        return True
         score = self._get_bsa_score()
         stage = self._get_bsa_stage()
         phone = self._get_whatsapp_phone()
