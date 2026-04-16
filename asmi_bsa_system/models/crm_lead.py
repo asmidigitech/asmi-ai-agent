@@ -14,13 +14,7 @@ _logger = logging.getLogger(__name__)
 class CrmLead(models.Model):
     _inherit = 'crm.lead'
 
-    # Reuse your existing live score/stage fields if already present in DB.
-    # If your actual fields are x_lg_score and x_lg_stage, keep using those in code below.
-    # These two are added here only if you want them in this module.
-    x_score = fields.Integer(string="Business Score")
-    x_stage = fields.Char(string="Business Stage")
-
-    # Minimal tracking fields
+    # New minimal fields only for the new BSA tracking/PDF flow
     x_tracking_token = fields.Char(string="Tracking Token", copy=False, index=True)
     x_pdf_attachment_id = fields.Many2one('ir.attachment', string="Score PDF Attachment")
     x_followup_state = fields.Char(string="Follow-up State")
@@ -28,25 +22,19 @@ class CrmLead(models.Model):
     x_last_event_at = fields.Datetime(string="Last Event At")
     x_paid_499 = fields.Boolean(string="₹499 Paid", default=False)
 
-    # ----------------------------
-    # Utility helpers
-    # ----------------------------
     def _get_bsa_score(self):
         self.ensure_one()
-        # Change priority here if your live field is x_lg_score
-        return self.x_score or getattr(self, 'x_lg_score', 0)
+        return self.x_lg_score or 0
 
     def _get_bsa_stage(self):
         self.ensure_one()
-        # Change priority here if your live field is x_lg_stage
-        return self.x_stage or getattr(self, 'x_lg_stage', '')
+        return self.x_lg_stage or ''
 
     def _normalize_phone_for_gallabox(self, phone):
-        """Return phone in 91XXXXXXXXXX format."""
         if not phone:
             return False
 
-        cleaned = ''.join(ch for ch in phone if ch.isdigit())
+        cleaned = ''.join(ch for ch in str(phone) if ch.isdigit())
 
         if len(cleaned) == 10:
             return '91' + cleaned
@@ -64,78 +52,73 @@ class CrmLead(models.Model):
         self.ensure_one()
         return self.partner_name or self.contact_name or self.name or f"Lead {self.id}"
 
-    def log_event(self, event_type, source=None, meta=None):
-        """Minimal state tracking on lead itself."""
+    def _get_whatsapp_phone(self):
         self.ensure_one()
 
-        self.write({
+        # Prefer your dedicated assessment phone if available, else fallback to phone
+        phone = False
+        if hasattr(self, 'x_studio_whatsapp_number') and self.x_studio_whatsapp_number:
+            phone = str(self.x_studio_whatsapp_number)
+        elif self.phone:
+            phone = str(self.phone)
+
+        return self._normalize_phone_for_gallabox(phone)
+
+    def log_event(self, event_type, source=None, meta=None):
+        self.ensure_one()
+
+        vals = {
             'x_last_event': event_type,
             'x_last_event_at': fields.Datetime.now(),
-        })
-
-        followup_state = self.x_followup_state
-        paid_499 = self.x_paid_499
+        }
 
         if event_type == 'pdf_generated':
-            followup_state = 'pdf_generated'
+            vals['x_followup_state'] = 'pdf_generated'
         elif event_type == 'wa_sent':
-            followup_state = 'wa_sent'
+            vals['x_followup_state'] = 'wa_sent'
         elif event_type == 'pdf_clicked':
-            followup_state = 'engaged'
+            vals['x_followup_state'] = 'engaged'
         elif event_type == 'payment_clicked':
-            followup_state = 'payment_clicked'
+            vals['x_followup_state'] = 'payment_clicked'
         elif event_type == 'payment_success':
-            followup_state = 'paid'
-            paid_499 = True
+            vals['x_followup_state'] = 'paid'
+            vals['x_paid_499'] = True
         elif event_type == 'wa_replied':
-            followup_state = 'active'
+            vals['x_followup_state'] = 'active'
 
-        self.write({
-            'x_followup_state': followup_state,
-            'x_paid_499': paid_499,
-        })
+        self.write(vals)
 
         _logger.info(
             "BSA event | lead_id=%s | event=%s | source=%s | meta=%s",
             self.id, event_type, source or '', meta or ''
         )
 
-    # ----------------------------
-    # Main combined flow
-    # ----------------------------
     def run_bsa_pdf_and_whatsapp(self):
         """
-        Final combined flow:
-        1. Validate lead data
-        2. Ensure token
-        3. Generate PDF from QWeb report
-        4. Save attachment
-        5. Build tracked PDF link
-        6. Send Gallabox template with document header
+        New flow only.
+        Does NOT touch existing wa1 / wa499 logic unless you explicitly call this method.
         """
         self.ensure_one()
 
         score = self._get_bsa_score()
         stage = self._get_bsa_stage()
-        phone = self._normalize_phone_for_gallabox(self.phone)
+        phone = self._get_whatsapp_phone()
 
         if not phone:
-            _logger.warning("Lead %s skipped: invalid or missing phone", self.id)
+            _logger.warning("Lead %s skipped: invalid/missing WhatsApp phone", self.id)
             return False
 
         if not score:
-            _logger.warning("Lead %s skipped: missing score", self.id)
+            _logger.warning("Lead %s skipped: missing x_lg_score", self.id)
             return False
 
         if not stage:
-            _logger.warning("Lead %s skipped: missing stage", self.id)
+            _logger.warning("Lead %s skipped: missing x_lg_stage", self.id)
             return False
 
-        # Ensure token
         if not self.x_tracking_token:
             self.x_tracking_token = str(uuid.uuid4())
 
-        # Render PDF
         try:
             report = self.env.ref('asmi_bsa_system.action_business_score_report')
         except ValueError:
@@ -148,7 +131,6 @@ class CrmLead(models.Model):
             _logger.exception("Failed to render PDF for lead %s", self.id)
             return False
 
-        # Replace old attachment if exists
         if self.x_pdf_attachment_id:
             try:
                 self.x_pdf_attachment_id.unlink()
@@ -175,7 +157,6 @@ class CrmLead(models.Model):
         self.x_pdf_attachment_id = attachment.id
         self.log_event('pdf_generated', source='odoo', meta=filename)
 
-        # Build tracked PDF link
         base_url = self._get_base_url()
         if not base_url:
             _logger.error("web.base.url not configured")
@@ -183,7 +164,6 @@ class CrmLead(models.Model):
 
         tracked_pdf_url = f"{base_url}/r/bsa/pdf/{self.x_tracking_token}"
 
-        # Gallabox config from system parameters
         gallabox_url = "https://server.gallabox.com/devapi/messages/whatsapp"
         icp = self.env['ir.config_parameter'].sudo()
 
@@ -193,7 +173,7 @@ class CrmLead(models.Model):
         language_code = icp.get_param('asmi.gallabox_language_code', 'en')
 
         if not channel_id or not api_key:
-            _logger.error("Missing Gallabox config: asmi.gallabox_channel_id / asmi.gallabox_api_key")
+            _logger.error("Missing Gallabox config")
             return False
 
         payload = {
@@ -208,7 +188,6 @@ class CrmLead(models.Model):
                     str(score),
                     stage,
                 ],
-                # Gallabox template header must be DOCUMENT
                 "headerValues": [
                     tracked_pdf_url
                 ]
@@ -231,8 +210,10 @@ class CrmLead(models.Model):
             _logger.exception("Gallabox request failed for lead %s", self.id)
             return False
 
-        _logger.info("Gallabox response | lead_id=%s | status=%s | body=%s",
-                     self.id, response.status_code, response.text)
+        _logger.info(
+            "Gallabox response | lead_id=%s | status=%s | body=%s",
+            self.id, response.status_code, response.text
+        )
 
         if 200 <= response.status_code < 300:
             self.log_event('wa_sent', source='gallabox', meta=response.text)
@@ -241,9 +222,6 @@ class CrmLead(models.Model):
         _logger.error("Gallabox send failed for lead %s: %s", self.id, response.text)
         return False
 
-    # ----------------------------
-    # Optional helper for payment success webhook use later
-    # ----------------------------
     def mark_bsa_payment_success(self, payment_id=None, payload=None):
         self.ensure_one()
         meta = {
